@@ -1,0 +1,47 @@
+name: build
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: make build
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: cocoon-agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: cocoon-agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          retention-days: 30

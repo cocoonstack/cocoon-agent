@@ -1,0 +1,8 @@
+bin/*
+cocoon-agent
+cocoon-agent-linux-*
+cocoon-agent-darwin-*
+coverage.out
+coverage.html
+coverage.txt
+dist/

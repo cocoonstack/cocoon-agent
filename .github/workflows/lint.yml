@@ -1,0 +1,30 @@
+name: lint
+
+on:
+  push:
+    tags:
+      - '!v*'
+    branches:
+      - '*'
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Lint
+        run: make lint
+
+      - name: Check formatting
+        run: make fmt-check

@@ -1,0 +1,18 @@
+[Unit]
+Description=Cocoon agent (vsock command exec)
+Documentation=https://github.com/cocoonstack/cocoon-agent
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/cocoon-agent serve
+Environment=AGENT_LOG_LEVEL=info
+Restart=always
+RestartSec=2s
+LimitNOFILE=65536
+# vsock needs no network capabilities; the kernel module is enough.
+
+[Install]
+WantedBy=multi-user.target
