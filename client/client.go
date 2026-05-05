@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 
 	"github.com/projecteru2/core/log"
 
@@ -24,6 +25,11 @@ const stdinChunkSize = 32 * 1024
 // waiting for the stdin pump — its blocking Read on a TTY caller can't
 // be unblocked from inside Run. The pump drains when the caller's stdin
 // closes or the next Encode fails on the closed conn.
+//
+// A non-EOF read error from the local stdin reader is propagated through
+// runCancel + a shared atomic so Run can override the child's exit code
+// with the actual cause; otherwise broken local IO would masquerade as
+// a clean MsgStdinClose.
 func Run(ctx context.Context, conn io.ReadWriteCloser, argv []string, env map[string]string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	if len(argv) == 0 {
 		return 0, errors.New("client: argv is empty")
@@ -42,9 +48,10 @@ func Run(ctx context.Context, conn io.ReadWriteCloser, argv []string, env map[st
 		return 0, fmt.Errorf("send exec frame: %w", err)
 	}
 
+	var stdinReadErr atomic.Pointer[error]
 	if stdin != nil {
 		// enc is single-writer post-handshake; no mutex needed.
-		go pumpStdin(stdin, enc)
+		go pumpStdin(stdin, enc, &stdinReadErr, runCancel)
 	} else {
 		_ = enc.Encode(agent.Message{Type: agent.MsgStdinClose})
 	}
@@ -57,6 +64,12 @@ readLoop:
 	for {
 		frame, err := dec.Decode()
 		if err != nil {
+			// Stdin read failure trips runCancel → conn.Close → this
+			// EOF/closed read. Surface the stdin error first so the
+			// caller sees the real cause.
+			if e := stdinReadErr.Load(); e != nil {
+				return 0, fmt.Errorf("read stdin: %w", *e)
+			}
 			if errors.Is(err, io.EOF) {
 				break
 			}
@@ -91,6 +104,9 @@ readLoop:
 		}
 	}
 
+	if e := stdinReadErr.Load(); e != nil {
+		return 0, fmt.Errorf("read stdin: %w", *e)
+	}
 	if !sawExit {
 		return 0, errors.New("agent: connection closed before exit frame")
 	}
@@ -98,8 +114,10 @@ readLoop:
 }
 
 // pumpStdin streams stdin → MsgStdin frames; on EOF sends MsgStdinClose.
-// Errors are silent: child closing stdin early is normal (e.g. `head -1`).
-func pumpStdin(r io.Reader, enc *agent.Encoder) {
+// Encode errors are silent (child closing stdin early is normal). A
+// non-EOF Read error is recorded in errOut and triggers cancel so Run's
+// readLoop unblocks and surfaces the failure.
+func pumpStdin(r io.Reader, enc *agent.Encoder, errOut *atomic.Pointer[error], cancel context.CancelFunc) {
 	buf := make([]byte, stdinChunkSize)
 	for {
 		n, err := r.Read(buf)
@@ -111,6 +129,11 @@ func pumpStdin(r io.Reader, enc *agent.Encoder) {
 			}
 		}
 		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				errCopy := err
+				errOut.Store(&errCopy)
+				cancel()
+			}
 			_ = enc.Encode(agent.Message{Type: agent.MsgStdinClose})
 			return
 		}

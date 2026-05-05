@@ -24,6 +24,7 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // argv from trusted vsock peer
+	setProcessGroup(cmd)
 	if len(env) > 0 {
 		cmd.Env = mergeEnv(env)
 	}

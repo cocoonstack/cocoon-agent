@@ -163,6 +163,92 @@ func TestServerNonexistentCommand(t *testing.T) {
 	}
 }
 
+// TestServerRejectsMalformedStdinFrame guards against the silent-EOF
+// regression: a malformed mid-stream frame must surface as MsgError, not
+// be papered over as a clean child stdin EOF.
+func TestServerRejectsMalformedStdinFrame(t *testing.T) {
+	t.Parallel()
+
+	srv, addr := newLoopbackServer(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	defer srv.Close() //nolint:errcheck
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close() //nolint:errcheck
+
+	enc := agent.NewEncoder(conn)
+	if err := enc.Encode(agent.Message{Type: agent.MsgExec, Argv: []string{"cat"}}); err != nil {
+		t.Fatalf("encode exec: %v", err)
+	}
+	// Inject a non-JSON line where a frame is expected.
+	if _, err := conn.Write([]byte("not-json\n")); err != nil {
+		t.Fatalf("inject malformed: %v", err)
+	}
+
+	dec := agent.NewDecoder(conn)
+	var sawError bool
+	for {
+		frame, err := dec.Decode()
+		if err != nil {
+			break
+		}
+		if frame.Type == agent.MsgError {
+			sawError = true
+			break
+		}
+	}
+	if !sawError {
+		t.Fatal("expected MsgError after malformed stdin frame")
+	}
+}
+
+// TestClientPropagatesStdinReadError guards against the local-IO-failure
+// regression: a non-EOF Read error must surface from Run, not be hidden
+// behind a successful exit code.
+func TestClientPropagatesStdinReadError(t *testing.T) {
+	t.Parallel()
+
+	srv, addr := newLoopbackServer(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	defer srv.Close() //nolint:errcheck
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	failingStdin := &erroringReader{after: 5, err: io.ErrUnexpectedEOF, payload: []byte("hello")}
+	_, err = client.Run(ctx, conn, []string{"cat"}, nil, failingStdin, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("expected error to propagate from broken local stdin")
+	}
+	if !strings.Contains(err.Error(), "read stdin") {
+		t.Errorf("expected read stdin wrap, got %v", err)
+	}
+}
+
+type erroringReader struct {
+	payload []byte
+	after   int
+	err     error
+}
+
+func (r *erroringReader) Read(p []byte) (int, error) {
+	if r.after > 0 {
+		n := copy(p, r.payload)
+		r.after = 0
+		return n, nil
+	}
+	return 0, r.err
+}
+
 func TestServerMergesEnvWithHost(t *testing.T) {
 	t.Parallel()
 
