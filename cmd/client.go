@@ -26,8 +26,8 @@ func newClientCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("dial vsock cid=%d port=%d: %w", cid, port, err)
 			}
-			defer conn.Close() //nolint:errcheck
-
+			// client.Run owns conn lifecycle: it closes via the runCancel
+			// goroutine before returning, so no defer Close needed here.
 			exitCode, err := client.Run(ctx, conn, args, nil, os.Stdin, os.Stdout, os.Stderr)
 			if err != nil {
 				return err

@@ -80,17 +80,15 @@ readLoop:
 		}
 		switch frame.Type {
 		case agent.MsgStarted:
-			// Useful for debug; non-fatal otherwise.
-		case agent.MsgStdout:
-			if stdout != nil {
-				if _, err := stdout.Write(frame.Data); err != nil {
-					return 0, fmt.Errorf("write stdout: %w", err)
-				}
+		case agent.MsgStdout, agent.MsgStderr:
+			w := stdout
+			name := "stdout"
+			if frame.Type == agent.MsgStderr {
+				w, name = stderr, "stderr"
 			}
-		case agent.MsgStderr:
-			if stderr != nil {
-				if _, err := stderr.Write(frame.Data); err != nil {
-					return 0, fmt.Errorf("write stderr: %w", err)
+			if w != nil {
+				if _, err := w.Write(frame.Data); err != nil {
+					return 0, fmt.Errorf("write %s: %w", name, err)
 				}
 			}
 		case agent.MsgExit:
@@ -122,9 +120,10 @@ func pumpStdin(r io.Reader, enc *agent.Encoder, errOut *atomic.Pointer[error], c
 	for {
 		n, err := r.Read(buf)
 		if n > 0 {
-			payload := make([]byte, n)
-			copy(payload, buf[:n])
-			if encErr := enc.Encode(agent.Message{Type: agent.MsgStdin, Data: payload}); encErr != nil {
+			// buf[:n] is safe to alias here: Encode → json.Marshal copies
+			// Data into its own buffer before returning, and the loop
+			// won't reuse buf until Encode does.
+			if encErr := enc.Encode(agent.Message{Type: agent.MsgStdin, Data: buf[:n]}); encErr != nil {
 				return
 			}
 		}

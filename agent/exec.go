@@ -57,7 +57,7 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 
 	// Surface any encoder error in preference to the child's exit —
 	// the client never received MsgExit anyway.
-	if encErr := firstNonNil(stdoutW.err(), stderrW.err()); encErr != nil {
+	if encErr := errors.Join(stdoutW.err(), stderrW.err()); encErr != nil {
 		return fmt.Errorf("write child output: %w", encErr)
 	}
 
@@ -112,13 +112,4 @@ func mergeEnv(env map[string]string) []string {
 		out = append(out, k+"="+v)
 	}
 	return out
-}
-
-func firstNonNil(errs ...error) error {
-	for _, e := range errs {
-		if e != nil {
-			return e
-		}
-	}
-	return nil
 }

@@ -4,6 +4,5 @@ package agent
 
 import "os/exec"
 
-// setProcessGroup is a darwin/dev-build no-op. The agent runs in a Linux
-// guest in production; this stub keeps `make build` working everywhere.
+// setProcessGroup is a no-op on non-Linux; production targets Linux guests.
 func setProcessGroup(_ *exec.Cmd) {}

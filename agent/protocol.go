@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 )
 
 // Frame types. MsgExit and MsgError are terminal — clients must treat
@@ -96,9 +97,7 @@ type framedWriter struct {
 	enc     *Encoder
 	mu      *sync.Mutex
 	cancel  context.CancelFunc
-
-	errMu   sync.Mutex
-	lastErr error
+	lastErr atomic.Pointer[error]
 }
 
 func newFramedWriter(msgType string, enc *Encoder, mu *sync.Mutex, cancel context.CancelFunc) *framedWriter {
@@ -109,24 +108,22 @@ func (w *framedWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	payload := make([]byte, len(p))
-	copy(payload, p)
-	if err := sendLocked(w.enc, w.mu, Message{Type: w.msgType, Data: payload}); err != nil {
-		w.errMu.Lock()
-		if w.lastErr == nil {
-			w.lastErr = err
-			if w.cancel != nil {
-				w.cancel()
-			}
+	// p is safe to alias here: sendLocked → Encode → json.Marshal copies
+	// Data into its own buffer before returning, and exec.Cmd's I/O pump
+	// won't reuse p until Write returns.
+	if err := sendLocked(w.enc, w.mu, Message{Type: w.msgType, Data: p}); err != nil {
+		errCopy := err
+		if w.lastErr.CompareAndSwap(nil, &errCopy) && w.cancel != nil {
+			w.cancel()
 		}
-		w.errMu.Unlock()
 		return 0, err
 	}
 	return len(p), nil
 }
 
 func (w *framedWriter) err() error {
-	w.errMu.Lock()
-	defer w.errMu.Unlock()
-	return w.lastErr
+	if e := w.lastErr.Load(); e != nil {
+		return *e
+	}
+	return nil
 }

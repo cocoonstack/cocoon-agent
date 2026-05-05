@@ -97,8 +97,8 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	// Inner ctx so a stdin protocol error can kill the child via runExec's
-	// CommandContext; runExec also derives its own cancel internally.
+	// Per-session ctx so a stdin protocol error can kill the child
+	// via runExec's CommandContext.
 	execCtx, execCancel := context.WithCancel(ctx)
 	defer execCancel()
 
