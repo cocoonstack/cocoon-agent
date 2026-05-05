@@ -1,7 +1,6 @@
-// Package agent implements the cocoon-agent server side: a vsock-listening
-// daemon that runs commands on behalf of host-side clients (vk-cocoon,
-// cocoon CLI, or anyone with vsock access). The wire protocol and the
-// process runner live here so they can be tested without spinning up vsock.
+// Package agent implements the cocoon-agent server: a vsock-listening
+// daemon that runs commands for host-side clients. Wire protocol + runner
+// live here so they're testable without vsock.
 package agent
 
 import (
@@ -13,12 +12,8 @@ import (
 	"sync"
 )
 
-// Message types exchanged on the framed wire. The protocol is line-delimited
-// JSON: one Message per line, both directions.
-//
-// Server frames are terminal in two cases: MsgExit on a clean run (with
-// exit_code), MsgError on a setup or wait failure (no MsgExit will follow).
-// Clients must treat both as session-closed.
+// Frame types. MsgExit and MsgError are terminal — clients must treat
+// both as session-closed; MsgError is never followed by MsgExit.
 const (
 	MsgExec       = "exec"
 	MsgStdin      = "stdin"
@@ -30,20 +25,12 @@ const (
 	MsgExit    = "exit"
 	MsgError   = "error"
 
-	// frameInitBuf is the scanner's starting buffer; tuned for the
-	// common 32 KiB stdout/stderr chunk plus base64 + JSON overhead.
+	// frameMaxBuf caps a single frame so a malformed peer can't OOM us.
 	frameInitBuf = 64 * 1024
-	// frameMaxBuf caps a single frame at 8 MiB. Generous for protocol
-	// growth (env maps, longer argv) but bounded so a malformed peer
-	// can't OOM the agent with one giant line.
-	frameMaxBuf = 8 * 1024 * 1024
+	frameMaxBuf  = 8 * 1024 * 1024
 )
 
-// Message is the union of all client and server frames. Only the fields
-// relevant to Type are populated; the rest are omitempty so the wire stays
-// small. Data carries base64-encoded bytes for stdin/stdout/stderr; argv
-// lives in Argv; ExitCode is the child's exit status; Message is the
-// human-readable error string for MsgError.
+// Message is the union of all frames. Only fields relevant to Type are populated.
 type Message struct {
 	Type     string            `json:"type"`
 	Argv     []string          `json:"argv,omitempty"`
@@ -54,19 +41,17 @@ type Message struct {
 	Message  string            `json:"message,omitempty"`
 }
 
-// Decoder reads framed Messages off a stream.
 type Decoder struct {
 	scanner *bufio.Scanner
 }
 
-// NewDecoder returns a Decoder reading from r.
 func NewDecoder(r io.Reader) *Decoder {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 0, frameInitBuf), frameMaxBuf)
 	return &Decoder{scanner: s}
 }
 
-// Decode reads the next Message. Returns io.EOF cleanly at end of stream.
+// Decode returns io.EOF cleanly at end of stream.
 func (d *Decoder) Decode() (Message, error) {
 	if !d.scanner.Scan() {
 		if err := d.scanner.Err(); err != nil {
@@ -81,20 +66,16 @@ func (d *Decoder) Decode() (Message, error) {
 	return m, nil
 }
 
-// Encoder writes framed Messages to a stream. Each Encode call emits one
-// JSON object plus a trailing newline. Encoder is not goroutine-safe; the
-// caller must serialize writes with an external mutex when multiple
-// goroutines write (typical pattern: framedWriter or sendLocked).
+// Encoder is not goroutine-safe; serialize via an external mutex when
+// multiple writers share one (see framedWriter / sendLocked).
 type Encoder struct {
 	w io.Writer
 }
 
-// NewEncoder returns an Encoder writing to w.
 func NewEncoder(w io.Writer) *Encoder {
 	return &Encoder{w: w}
 }
 
-// Encode writes m followed by a newline.
 func (e *Encoder) Encode(m Message) error {
 	buf, err := json.Marshal(m)
 	if err != nil {
@@ -107,11 +88,9 @@ func (e *Encoder) Encode(m Message) error {
 	return nil
 }
 
-// framedWriter adapts an io.Writer surface (so it can be assigned to
-// exec.Cmd.Stdout/Stderr and driven by cmd.Wait) onto framed messages.
-// A persistent encode failure (host gone) is captured into lastErr and
-// also fires the supplied cancel — which the runner uses to terminate
-// the child instead of letting it write into a black hole.
+// framedWriter adapts io.Writer onto framed messages so it can drive
+// exec.Cmd.Stdout/Stderr. First encode failure is captured and fires
+// cancel so the runner can kill the child.
 type framedWriter struct {
 	msgType string
 	enc     *Encoder
@@ -122,9 +101,6 @@ type framedWriter struct {
 	lastErr error
 }
 
-// newFramedWriter binds a framedWriter to its target message type and
-// the shared encoder/mutex. cancel is invoked once on the first encode
-// failure so the runtime can react to a dropped peer.
 func newFramedWriter(msgType string, enc *Encoder, mu *sync.Mutex, cancel context.CancelFunc) *framedWriter {
 	return &framedWriter{msgType: msgType, enc: enc, mu: mu, cancel: cancel}
 }

@@ -8,9 +8,8 @@ import (
 	coretypes "github.com/projecteru2/core/types"
 )
 
-// setupLog initializes the projecteru2 logger from the AGENT_LOG_LEVEL env
-// var (default info). cocoon-agent runs inside a VM where systemd captures
-// stdout/stderr to journald, so file logging is intentionally disabled.
+// setupLog reads AGENT_LOG_LEVEL (default info). File logging is off —
+// systemd captures stdout/stderr to journald inside the VM.
 func setupLog(ctx context.Context) error {
 	level := os.Getenv("AGENT_LOG_LEVEL")
 	if level == "" {

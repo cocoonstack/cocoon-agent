@@ -1,9 +1,6 @@
-// Package client is a small wrapper around the cocoon-agent wire protocol
-// for use by host-side callers. The production caller is vk-cocoon (it
-// will eventually shell out via `cocoon vm exec`, but during bring-up the
-// client is also useful for direct vsock testing). Keep it transport-
-// agnostic — Run takes an io.ReadWriteCloser, so callers can swap in
-// vsock.Dial, net.Dial("tcp"), or an in-memory pipe for tests.
+// Package client wraps the cocoon-agent wire protocol for host-side use.
+// Transport-agnostic: Run takes io.ReadWriteCloser so callers swap in
+// vsock.Dial, net.Dial, or an in-memory pipe for tests.
 package client
 
 import (
@@ -17,30 +14,22 @@ import (
 	"github.com/cocoonstack/cocoon-agent/agent"
 )
 
-// stdinChunkSize is how much we read from caller stdin per iteration.
-// Mirrors the kernel pipe buffer; small enough to keep latency low for
-// interactive sessions, large enough to amortize JSON framing overhead.
 const stdinChunkSize = 32 * 1024
 
-// Run executes argv on the connected agent and bridges I/O. Returns the
-// child exit code on success.
+// Run executes argv and bridges I/O, returning the child exit code.
+// nil stdin/stdout/stderr → no-stdin / discard. Matches kubectl exec
+// AttachIO semantics.
 //
-// stdin/stdout/stderr may be nil. A nil stdin means "no stdin" — the
-// agent observes immediate EOF on the child's stdin. A nil stdout/stderr
-// means "discard". Matches kubectl exec / api.AttachIO semantics.
-//
-// Lifecycle: Run does NOT wait for the stdin pump to finish. After the
-// agent sends MsgExit (or MsgError) we close conn so the pump's next
-// Encode fails and the goroutine winds down. The pump's blocking Read
-// on a TTY caller cannot be unblocked from inside Run; the goroutine
-// drains when the caller closes its stdin or the conn is fully torn down.
+// Lifecycle: after MsgExit/MsgError, Run closes conn and returns without
+// waiting for the stdin pump — its blocking Read on a TTY caller can't
+// be unblocked from inside Run. The pump drains when the caller's stdin
+// closes or the next Encode fails on the closed conn.
 func Run(ctx context.Context, conn io.ReadWriteCloser, argv []string, env map[string]string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	if len(argv) == 0 {
 		return 0, errors.New("client: argv is empty")
 	}
 
-	// Sub-ctx scoped to this Run so the conn-closer goroutine doesn't
-	// outlive Run on the caller's longer-lived ctx.
+	// Sub-ctx so the conn-closer doesn't outlive Run on a longer-lived caller ctx.
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 	go func() {
@@ -54,10 +43,7 @@ func Run(ctx context.Context, conn io.ReadWriteCloser, argv []string, env map[st
 	}
 
 	if stdin != nil {
-		// Best-effort: enc is single-writer post-handshake (read loop
-		// never writes), so no mutex is needed. The pump survives Run
-		// returning until the caller's stdin closes or our conn close
-		// trips its next Encode.
+		// enc is single-writer post-handshake; no mutex needed.
 		go pumpStdin(stdin, enc)
 	} else {
 		_ = enc.Encode(agent.Message{Type: agent.MsgStdinClose})
@@ -111,9 +97,8 @@ readLoop:
 	return exitCode, nil
 }
 
-// pumpStdin streams the caller's stdin to the agent as MsgStdin frames,
-// then sends MsgStdinClose on EOF. Errors are silenced because a child
-// that closes stdin early is normal (e.g. `head -n 1`).
+// pumpStdin streams stdin → MsgStdin frames; on EOF sends MsgStdinClose.
+// Errors are silent: child closing stdin early is normal (e.g. `head -1`).
 func pumpStdin(r io.Reader, enc *agent.Encoder) {
 	buf := make([]byte, stdinChunkSize)
 	for {

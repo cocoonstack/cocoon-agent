@@ -8,9 +8,7 @@ import (
 	"net"
 )
 
-// vsockOnlyOnLinux keeps `make build` working on darwin developer
-// machines without dragging in a vsock fake. Cross-build with
-// GOOS=linux for production.
+// errVsockOnlyOnLinux keeps `make build` working on darwin dev machines.
 var errVsockOnlyOnLinux = errors.New("vsock is only supported on linux; cross-build with GOOS=linux for production")
 
 func listenVsock(_ uint32) (net.Listener, error) {

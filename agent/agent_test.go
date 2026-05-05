@@ -14,9 +14,7 @@ import (
 	"github.com/cocoonstack/cocoon-agent/client"
 )
 
-// newLoopbackServer wires the server onto a loopback TCP listener so the
-// accept loop, connection lifecycle, and runExec run end-to-end without
-// needing vsock. Server takes net.Listener directly — no wrapper needed.
+// newLoopbackServer runs the agent over loopback TCP so tests don't need vsock.
 func newLoopbackServer(t *testing.T) (*agent.Server, string) {
 	t.Helper()
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")

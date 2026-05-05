@@ -1,4 +1,4 @@
-// Package cmd wires the cocoon-agent subcommands.
+// Package cmd wires cocoon-agent subcommands.
 package cmd
 
 import (
@@ -15,7 +15,6 @@ import (
 	"github.com/cocoonstack/cocoon-agent/version"
 )
 
-// NewRootCmd returns the root cobra command with subcommands attached.
 func NewRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:     "cocoon-agent",
@@ -27,9 +26,7 @@ func NewRootCmd() *cobra.Command {
 	return rootCmd
 }
 
-// Execute runs the root command, exiting with the appropriate status. It
-// is a thin wrapper around run() so deferred cancels and other cleanups
-// run before the process exits.
+// Execute wraps run() so deferred cleanups fire before os.Exit.
 func Execute() {
 	os.Exit(run())
 }

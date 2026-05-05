@@ -1,11 +1,6 @@
-// Package main is the cocoon-agent entry point.
-//
-// cocoon-agent runs inside a Cocoon-managed VM and exposes a host-to-guest
-// command-execution channel over virtio-vsock, replacing SSH for control
-// plane operations like kubectl exec. The agent assumes the host (vk-cocoon
-// or any other vsock client running as root on the same node) is trusted —
-// vsock cannot be reached from the network, so the host UID is the auth
-// boundary.
+// Package main is the cocoon-agent entry point. The agent runs inside a
+// Cocoon-managed VM and serves command-exec requests over virtio-vsock.
+// Trust model: vsock is host-local, so the host UID is the auth boundary.
 package main
 
 import (

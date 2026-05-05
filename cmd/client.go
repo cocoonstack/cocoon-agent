@@ -32,9 +32,6 @@ func newClientCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Propagate child exit code by returning a sentinel error
-			// — Execute() unwraps it after deferreds (including our
-			// conn.Close above) have run.
 			if exitCode != 0 {
 				return &exitCodeError{code: exitCode}
 			}
@@ -47,9 +44,8 @@ func newClientCmd() *cobra.Command {
 	return cmd
 }
 
-// exitCodeError carries a child exit code up through cobra's RunE so
-// Execute() can convert it back to an os.Exit status without
-// short-circuiting deferred cleanups.
+// exitCodeError carries the child exit code through cobra's RunE so
+// Execute() can map it to os.Exit without short-circuiting defers.
 type exitCodeError struct{ code int }
 
 func (e *exitCodeError) Error() string { return fmt.Sprintf("exit code %d", e.code) }
