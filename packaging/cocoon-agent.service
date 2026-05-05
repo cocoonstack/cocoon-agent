@@ -1,18 +1,28 @@
 [Unit]
 Description=Cocoon agent (vsock command exec)
 Documentation=https://github.com/cocoonstack/cocoon-agent
-After=network-online.target
+# vsock is host-local; no network or DNS dependency.
 
 [Service]
 Type=simple
 User=root
 Group=root
+# vhost_vsock is loaded by default on most distros but minimal guest
+# images may skip it; modprobe makes the unit self-sufficient.
+ExecStartPre=/sbin/modprobe vhost_vsock
 ExecStart=/usr/local/bin/cocoon-agent serve
 Environment=AGENT_LOG_LEVEL=info
 Restart=always
 RestartSec=2s
 LimitNOFILE=65536
-# vsock needs no network capabilities; the kernel module is enough.
+# KillMode=control-group (default) is correct: in-flight kubectl-exec
+# children inherit the unit's cgroup and are torn down with the agent
+# on systemctl stop.
+#
+# The agent intentionally runs as root: it executes commands on behalf
+# of host-side callers, so privilege drop would defeat its purpose.
+# All other process hardening (PrivateTmp, ProtectSystem, ...) is left
+# off to preserve full exec semantics for arbitrary client commands.
 
 [Install]
 WantedBy=multi-user.target
