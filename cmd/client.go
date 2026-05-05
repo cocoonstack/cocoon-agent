@@ -17,10 +17,9 @@ func newClientCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:                "client [flags] -- <argv>...",
-		Short:              "Run a command on a remote cocoon-agent (debug / smoke test)",
-		Args:               cobra.MinimumNArgs(1),
-		DisableFlagParsing: false,
+		Use:   "client [flags] -- <argv>...",
+		Short: "Run a command on a remote cocoon-agent (debug / smoke test)",
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			ctx := c.Context()
 			conn, err := dialVsock(cid, port)
@@ -33,7 +32,12 @@ func newClientCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			os.Exit(exitCode)
+			// Propagate child exit code by returning a sentinel error
+			// — Execute() unwraps it after deferreds (including our
+			// conn.Close above) have run.
+			if exitCode != 0 {
+				return &exitCodeError{code: exitCode}
+			}
 			return nil
 		},
 	}
@@ -42,3 +46,10 @@ func newClientCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("cid")
 	return cmd
 }
+
+// exitCodeError carries a child exit code up through cobra's RunE so
+// Execute() can convert it back to an os.Exit status without
+// short-circuiting deferred cleanups.
+type exitCodeError struct{ code int }
+
+func (e *exitCodeError) Error() string { return fmt.Sprintf("exit code %d", e.code) }

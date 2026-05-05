@@ -11,7 +11,7 @@ Cocoon's host components (vk-cocoon, cocoon CLI) and the VMs they manage always 
 - requires per-VM credentials to be provisioned and rotated
 - comes with the full SSH protocol surface (handshake, key exchange, host key trust)
 
-vsock is host↔guest only, has no IP layer, and the kernel `vhost_vsock` module is the auth boundary — anything that can connect from the host is already privileged on that host. cocoon-agent leverages this for a 200-line replacement that gives kubectl-exec semantics (stdin / stdout / stderr / exit code) with none of those dependencies.
+vsock is host↔guest only, has no IP layer, and the kernel `vhost_vsock` module is the auth boundary — anything that can connect from the host is already privileged on that host. cocoon-agent leverages this for a small focused daemon that gives kubectl-exec semantics (stdin / stdout / stderr / exit code) with none of those dependencies.
 
 ## Status
 

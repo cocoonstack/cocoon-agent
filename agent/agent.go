@@ -11,30 +11,30 @@ import (
 	"github.com/projecteru2/core/log"
 )
 
-// DefaultPort is the default vsock port the agent listens on. 1024 is below
-// the privileged port boundary on Linux but vsock has no such concept; the
-// number is arbitrary, picked to avoid collision with well-known TCP ports
-// in case anyone ever maps vsock<->TCP.
-const DefaultPort = 1024
+const (
+	// DefaultPort is the default vsock port the agent listens on. The
+	// number is arbitrary; vsock has no privileged-port concept. Picked
+	// to avoid collision with well-known TCP ports in case anyone ever
+	// maps vsock<->TCP.
+	DefaultPort = 1024
 
-// Listener is the interface a transport-specific listener must implement.
-// Production uses vsock.Listen; tests use a TCP or pipe listener so the
-// accept loop can run without a kernel vsock module.
-type Listener interface {
-	Accept() (net.Conn, error)
-	Close() error
-	Addr() net.Addr
-}
+	// stdinFrameBuffer caps in-flight stdin chunks per session. 8 is
+	// enough to keep a fast typist or a `cat largefile | kubectl exec`
+	// from stalling on the channel while the child reads.
+	stdinFrameBuffer = 8
+)
 
 // Server runs the agent accept loop. It is goroutine-safe and stops when
-// the supplied context is canceled or Close is called.
+// the supplied context is canceled or Close is called. The listener is a
+// plain net.Listener so production (vsock) and tests (loopback TCP) share
+// the same wiring.
 type Server struct {
-	listener Listener
+	listener net.Listener
 }
 
 // NewServer wraps a listener. The caller owns Listener lifecycle; Close
 // calls listener.Close so callers don't need to layer their own defers.
-func NewServer(listener Listener) *Server {
+func NewServer(listener net.Listener) *Server {
 	return &Server{listener: listener}
 }
 
@@ -58,7 +58,7 @@ func (s *Server) Serve(ctx context.Context) error {
 				connWG.Wait()
 				return nil
 			}
-			logger.Errorf(ctx, err, "accept")
+			logger.Error(ctx, err, "accept")
 			return fmt.Errorf("accept: %w", err)
 		}
 		connWG.Add(1)
@@ -69,18 +69,24 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 }
 
-// Close stops the accept loop. Safe to call multiple times.
+// Close stops the accept loop. Idempotent — net.Listener.Close returns
+// net.ErrClosed on second call, which Serve treats as a clean shutdown.
 func (s *Server) Close() error {
 	return s.listener.Close()
 }
 
-// handleConn drives one client session. It reads the initial MsgExec frame,
-// dispatches to runExec, and propagates further client frames as stdin to
-// the running command. The session ends when the command exits (MsgExit)
-// or the connection drops.
+// handleConn drives one client session: read MsgExec, dispatch to runExec,
+// forward subsequent client frames as stdin to the running command, send
+// MsgExit on completion. The session ends when the command exits or the
+// connection drops.
+//
+// Lifecycle: we close conn explicitly before waiting on the stdin reader
+// so its blocking Read returns. Without that, the reader would hold the
+// goroutine open until the client side closed first — a leak when the
+// client is well-behaved-but-slow.
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	logger := log.WithFunc("agent.Server.handleConn")
-	defer conn.Close() //nolint:errcheck
+	defer conn.Close() //nolint:errcheck // idempotent; main close happens below
 
 	dec := NewDecoder(conn)
 	enc := NewEncoder(conn)
@@ -98,35 +104,37 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	stdinFrames := make(chan Message, 8) //nolint:mnd
-	execCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
+	stdinFrames := make(chan Message, stdinFrameBuffer)
 	stdinDone := make(chan struct{})
-	go func() {
-		defer close(stdinDone)
-		for {
-			frame, err := dec.Decode()
-			if err != nil {
-				close(stdinFrames)
-				return
-			}
-			select {
-			case stdinFrames <- frame:
-			case <-execCtx.Done():
-				close(stdinFrames)
-				return
-			}
-			if frame.Type == MsgStdinClose {
-				close(stdinFrames)
-				return
-			}
-		}
-	}()
+	go readStdinFrames(ctx, dec, stdinFrames, stdinDone)
 
-	if err := runExec(execCtx, first.Argv, first.Env, stdinFrames, enc, &encMu); err != nil {
+	if err := runExec(ctx, first.Argv, first.Env, stdinFrames, enc, &encMu); err != nil {
 		logger.Warnf(ctx, "exec session ended with error: %v", err)
 	}
-	cancel()
+	// Closing conn unblocks readStdinFrames' Decode call so the goroutine
+	// can drain. The deferred Close runs again after we return, harmlessly.
+	_ = conn.Close()
 	<-stdinDone
+}
+
+// readStdinFrames pumps client frames from dec into stdinFrames until the
+// client sends MsgStdinClose, the connection drops, or the context fires.
+// It owns the channel close so runExec's pumpStdin observes a clean EOF.
+func readStdinFrames(ctx context.Context, dec *Decoder, stdinFrames chan<- Message, done chan<- struct{}) {
+	defer close(done)
+	defer close(stdinFrames)
+	for {
+		frame, err := dec.Decode()
+		if err != nil {
+			return
+		}
+		select {
+		case stdinFrames <- frame:
+		case <-ctx.Done():
+			return
+		}
+		if frame.Type == MsgStdinClose {
+			return
+		}
+	}
 }

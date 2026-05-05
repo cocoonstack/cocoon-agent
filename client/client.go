@@ -11,26 +11,40 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
+
+	"github.com/projecteru2/core/log"
 
 	"github.com/cocoonstack/cocoon-agent/agent"
 )
 
+// stdinChunkSize is how much we read from caller stdin per iteration.
+// Mirrors the kernel pipe buffer; small enough to keep latency low for
+// interactive sessions, large enough to amortize JSON framing overhead.
+const stdinChunkSize = 32 * 1024
+
 // Run executes argv on the connected agent and bridges I/O. Returns the
-// child exit code on success. ctx cancellation closes conn so the agent
-// observes EOF and the running command is reaped via its cmd context.
+// child exit code on success.
 //
 // stdin/stdout/stderr may be nil. A nil stdin means "no stdin" — the
 // agent observes immediate EOF on the child's stdin. A nil stdout/stderr
-// means "discard". This matches kubectl exec / api.AttachIO semantics.
+// means "discard". Matches kubectl exec / api.AttachIO semantics.
+//
+// Lifecycle: Run does NOT wait for the stdin pump to finish. After the
+// agent sends MsgExit (or MsgError) we close conn so the pump's next
+// Encode fails and the goroutine winds down. The pump's blocking Read
+// on a TTY caller cannot be unblocked from inside Run; the goroutine
+// drains when the caller closes its stdin or the conn is fully torn down.
 func Run(ctx context.Context, conn io.ReadWriteCloser, argv []string, env map[string]string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	if len(argv) == 0 {
 		return 0, errors.New("client: argv is empty")
 	}
 
-	// Cancel-on-ctx: closing the conn unblocks dec.Decode and pumpStdin.
+	// Sub-ctx scoped to this Run so the conn-closer goroutine doesn't
+	// outlive Run on the caller's longer-lived ctx.
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
 	go func() {
-		<-ctx.Done()
+		<-runCtx.Done()
 		_ = conn.Close()
 	}()
 
@@ -39,11 +53,13 @@ func Run(ctx context.Context, conn io.ReadWriteCloser, argv []string, env map[st
 		return 0, fmt.Errorf("send exec frame: %w", err)
 	}
 
-	stdinDone := make(chan struct{})
 	if stdin != nil {
-		go pumpStdin(stdin, enc, stdinDone)
+		// Best-effort: enc is single-writer post-handshake (read loop
+		// never writes), so no mutex is needed. The pump survives Run
+		// returning until the caller's stdin closes or our conn close
+		// trips its next Encode.
+		go pumpStdin(stdin, enc)
 	} else {
-		close(stdinDone)
 		_ = enc.Encode(agent.Message{Type: agent.MsgStdinClose})
 	}
 
@@ -84,10 +100,11 @@ readLoop:
 			break readLoop
 		case agent.MsgError:
 			return 0, fmt.Errorf("agent: %s", frame.Message)
+		default:
+			log.WithFunc("client.Run").Warnf(ctx, "ignoring unknown frame type %q", frame.Type)
 		}
 	}
 
-	<-stdinDone
 	if !sawExit {
 		return 0, errors.New("agent: connection closed before exit frame")
 	}
@@ -97,26 +114,19 @@ readLoop:
 // pumpStdin streams the caller's stdin to the agent as MsgStdin frames,
 // then sends MsgStdinClose on EOF. Errors are silenced because a child
 // that closes stdin early is normal (e.g. `head -n 1`).
-func pumpStdin(r io.Reader, enc *agent.Encoder, done chan<- struct{}) {
-	defer close(done)
-	buf := make([]byte, 32*1024) //nolint:mnd
-	var sendMu sync.Mutex
+func pumpStdin(r io.Reader, enc *agent.Encoder) {
+	buf := make([]byte, stdinChunkSize)
 	for {
 		n, err := r.Read(buf)
 		if n > 0 {
 			payload := make([]byte, n)
 			copy(payload, buf[:n])
-			sendMu.Lock()
-			sendErr := enc.Encode(agent.Message{Type: agent.MsgStdin, Data: payload})
-			sendMu.Unlock()
-			if sendErr != nil {
+			if encErr := enc.Encode(agent.Message{Type: agent.MsgStdin, Data: payload}); encErr != nil {
 				return
 			}
 		}
 		if err != nil {
-			sendMu.Lock()
 			_ = enc.Encode(agent.Message{Type: agent.MsgStdinClose})
-			sendMu.Unlock()
 			return
 		}
 	}

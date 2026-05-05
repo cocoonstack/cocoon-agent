@@ -14,22 +14,16 @@ import (
 	"github.com/cocoonstack/cocoon-agent/client"
 )
 
-// loopbackListener wraps a TCP listener to satisfy the agent.Listener
-// interface without depending on vsock. Tests run end-to-end over loopback
-// so we exercise accept loop, connection lifecycle, and runExec together.
-type loopbackListener struct {
-	net.Listener
-}
-
-func (l *loopbackListener) Accept() (net.Conn, error) { return l.Listener.Accept() }
-
+// newLoopbackServer wires the server onto a loopback TCP listener so the
+// accept loop, connection lifecycle, and runExec run end-to-end without
+// needing vsock. Server takes net.Listener directly — no wrapper needed.
 func newLoopbackServer(t *testing.T) (*agent.Server, string) {
 	t.Helper()
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen tcp: %v", err)
 	}
-	return agent.NewServer(&loopbackListener{tcp}), tcp.Addr().String()
+	return agent.NewServer(tcp), tcp.Addr().String()
 }
 
 func TestServerExecHelloWorld(t *testing.T) {
@@ -146,5 +140,62 @@ func TestServerRejectsNonExecFirstFrame(t *testing.T) {
 	}
 	if frame.Type != agent.MsgError {
 		t.Errorf("expected error frame, got %#v", frame)
+	}
+}
+
+func TestServerNonexistentCommand(t *testing.T) {
+	t.Parallel()
+
+	srv, addr := newLoopbackServer(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	defer srv.Close() //nolint:errcheck
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	_, err = client.Run(ctx, conn, []string{"/does-not-exist-binary"}, nil, nil, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("expected error for nonexistent command, got nil")
+	}
+	if !strings.Contains(err.Error(), "agent:") {
+		t.Errorf("expected agent error wrap, got %v", err)
+	}
+}
+
+func TestServerMergesEnvWithHost(t *testing.T) {
+	t.Parallel()
+
+	srv, addr := newLoopbackServer(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
+	defer cancel()
+	go func() { _ = srv.Serve(ctx) }()
+	defer srv.Close() //nolint:errcheck
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	var stdout bytes.Buffer
+	exit, err := client.Run(
+		ctx, conn,
+		[]string{"sh", "-c", "echo $COCOON_AGENT_TEST_VAR && echo PATH=$PATH"},
+		map[string]string{"COCOON_AGENT_TEST_VAR": "merged-value"},
+		nil, &stdout, io.Discard,
+	)
+	if err != nil {
+		t.Fatalf("client run: %v", err)
+	}
+	if exit != 0 {
+		t.Errorf("exit = %d, want 0", exit)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "merged-value") {
+		t.Errorf("caller env var not propagated: %q", out)
+	}
+	if !strings.Contains(out, "PATH=") || strings.Contains(out, "PATH=\n") {
+		t.Errorf("host PATH not preserved on merge: %q", out)
 	}
 }

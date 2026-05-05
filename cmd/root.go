@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -43,7 +44,11 @@ func run() int {
 	}
 
 	if err := NewRootCmd().ExecuteContext(ctx); err != nil {
-		log.WithFunc("cmd.Execute").Errorf(ctx, err, "command failed")
+		var ec *exitCodeError
+		if errors.As(err, &ec) {
+			return ec.code
+		}
+		log.WithFunc("cmd.Execute").Error(ctx, err, "command failed")
 		return 1
 	}
 	return 0
