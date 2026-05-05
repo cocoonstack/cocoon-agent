@@ -7,9 +7,11 @@ Documentation=https://github.com/cocoonstack/cocoon-agent
 Type=simple
 User=root
 Group=root
-# vhost_vsock is loaded by default on most distros but minimal guest
-# images may skip it; modprobe makes the unit self-sufficient.
-ExecStartPre=/sbin/modprobe vhost_vsock
+# Best-effort load of vsock transport. Most distro kernels build it in
+# or auto-load on virtio-vsock device probe; the leading dash keeps the
+# unit alive on minimal kernels that ship without the module entirely
+# (e.g. ubuntu linux-image-virtual in cocoon's OCI guest images).
+ExecStartPre=-/sbin/modprobe vhost_vsock
 ExecStart=/usr/local/bin/cocoon-agent serve
 Environment=AGENT_LOG_LEVEL=info
 Restart=always
