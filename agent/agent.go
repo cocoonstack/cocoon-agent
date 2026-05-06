@@ -26,6 +26,7 @@ type Server struct {
 	conns map[net.Conn]struct{}
 }
 
+// NewServer wraps listener so callers can drive Serve / Close.
 func NewServer(listener net.Listener) *Server {
 	return &Server{
 		listener: listener,

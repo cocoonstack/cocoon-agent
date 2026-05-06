@@ -1,6 +1,6 @@
+// Package version holds build-time metadata set via ldflags.
 package version
 
-// These variables are set by ldflags at build time.
 var (
 	VERSION  = "dev"
 	REVISION = "unknown"

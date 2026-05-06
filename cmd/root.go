@@ -15,6 +15,7 @@ import (
 	"github.com/cocoonstack/cocoon-agent/version"
 )
 
+// NewRootCmd returns the cocoon-agent root command with all subcommands wired.
 func NewRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:     "cocoon-agent",

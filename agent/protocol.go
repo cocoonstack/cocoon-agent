@@ -42,10 +42,12 @@ type Message struct {
 	Message  string            `json:"message,omitempty"`
 }
 
+// Decoder reads line-delimited JSON frames off a reader.
 type Decoder struct {
 	scanner *bufio.Scanner
 }
 
+// NewDecoder wraps r with a frame-bounded scanner.
 func NewDecoder(r io.Reader) *Decoder {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 0, frameInitBuf), frameMaxBuf)
@@ -73,10 +75,12 @@ type Encoder struct {
 	w io.Writer
 }
 
+// NewEncoder returns an Encoder writing newline-delimited JSON frames to w.
 func NewEncoder(w io.Writer) *Encoder {
 	return &Encoder{w: w}
 }
 
+// Encode marshals m as a single newline-terminated JSON frame.
 func (e *Encoder) Encode(m Message) error {
 	buf, err := json.Marshal(m)
 	if err != nil {

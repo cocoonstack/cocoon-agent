@@ -1,6 +1,6 @@
 module github.com/cocoonstack/cocoon-agent
 
-go 1.25.0
+go 1.25.6
 
 require (
 	github.com/mdlayher/vsock v1.2.1

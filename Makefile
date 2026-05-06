@@ -1,4 +1,4 @@
-.PHONY: all build test lint lint-linux lint-darwin vet vet-linux vet-darwin fmt fmt-check deps clean coverage cloc help
+.PHONY: all build test lint vet fmt fmt-check deps clean coverage cloc help
 
 REPO_PATH := github.com/cocoonstack/cocoon-agent
 BINARY_NAME := cocoon-agent
@@ -33,6 +33,9 @@ GOLANGCILINT := $(GOLANGCILINT_ROOT)/golangci-lint
 
 GOFMT := $(LOCALBIN)/gofumpt
 GOIMPORTS := $(LOCALBIN)/goimports
+
+## Target OSes for vet / lint
+GOOSES ?= linux darwin
 
 ## Tool download targets
 .PHONY: golangci-lint
@@ -76,17 +79,17 @@ coverage: test ## Generate and display coverage report
 
 # --- Code quality ---
 
-vet: vet-linux vet-darwin ## Run go vet (linux + darwin)
-vet-linux:
-	GOOS=linux go vet ./...
-vet-darwin:
-	GOOS=darwin go vet ./...
+vet: ## Run go vet on every target OS
+	@for goos in $(GOOSES); do \
+		echo "==> go vet GOOS=$$goos"; \
+		GOOS=$$goos go vet ./... || exit 1; \
+	done
 
-lint: lint-linux lint-darwin ## Run golangci-lint (linux + darwin)
-lint-linux: golangci-lint
-	GOOS=linux $(GOLANGCILINT) run ./...
-lint-darwin: golangci-lint
-	GOOS=darwin $(GOLANGCILINT) run ./...
+lint: golangci-lint ## Run golangci-lint on every target OS
+	@for goos in $(GOOSES); do \
+		echo "==> golangci-lint GOOS=$$goos"; \
+		GOOS=$$goos $(GOLANGCILINT) run ./... || exit 1; \
+	done
 
 fmt: gofumpt goimports ## Format code with gofumpt and goimports
 	$(GOFMT) -l -w .
