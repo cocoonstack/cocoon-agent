@@ -18,6 +18,9 @@ BUILD_OUT ?= $(BINARY_NAME)
 ifneq ($(GOOS),)
 ifneq ($(GOARCH),)
 BUILD_OUT := $(BINARY_NAME)-$(GOOS)-$(GOARCH)
+ifeq ($(GOOS),windows)
+BUILD_OUT := $(BUILD_OUT).exe
+endif
 endif
 endif
 
@@ -35,7 +38,7 @@ GOFMT := $(LOCALBIN)/gofumpt
 GOIMPORTS := $(LOCALBIN)/goimports
 
 ## Target OSes for vet / lint
-GOOSES ?= linux darwin
+GOOSES ?= linux darwin windows
 
 ## Tool download targets
 .PHONY: golangci-lint
@@ -102,7 +105,7 @@ fmt-check: gofumpt goimports ## Check formatting (fails if files need formatting
 # --- Maintenance ---
 
 clean: ## Remove build artifacts, coverage files, and test cache
-	rm -f $(BINARY_NAME) $(BINARY_NAME)-linux-* $(BINARY_NAME)-darwin-*
+	rm -f $(BINARY_NAME) $(BINARY_NAME)-linux-* $(BINARY_NAME)-darwin-* $(BINARY_NAME)-windows-*
 	rm -rf bin/ dist/
 	rm -f coverage.out coverage.html coverage.txt
 	go clean -testcache
