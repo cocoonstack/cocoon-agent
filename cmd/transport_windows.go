@@ -36,6 +36,29 @@ const (
 	// callers shouldn't be able to drive the agent.
 	vmAddrCidHost = 2
 	vmAddrCidAny  = 0xFFFFFFFF
+
+	// sockaddrVMSize is the on-wire byte size of struct sockaddr_vm (16).
+	sockaddrVMSize = int32(unsafe.Sizeof(sockaddrVM{}))
+
+	// socketError is the winsock SOCKET_ERROR sentinel (== -1 cast to unsigned).
+	socketError = ^uintptr(0)
+)
+
+var (
+	modws2_32           = windows.NewLazySystemDLL("ws2_32.dll")
+	procBind            = modws2_32.NewProc("bind")
+	procListen          = modws2_32.NewProc("listen")
+	procAccept          = modws2_32.NewProc("accept")
+	procConnect         = modws2_32.NewProc("connect")
+	procRecv            = modws2_32.NewProc("recv")
+	procSend            = modws2_32.NewProc("send")
+	procWSAStartup      = modws2_32.NewProc("WSAStartup")
+	procWSAGetLastError = modws2_32.NewProc("WSAGetLastError")
+
+	wsaInitOnce sync.Once
+	wsaInitErr  error
+
+	errDeadlineUnsupported = errors.New("vsock: deadline unsupported on windows")
 )
 
 // sockaddrVM matches `struct sockaddr_vm` exactly (16 bytes). Field order
@@ -49,20 +72,6 @@ type sockaddrVM struct {
 	_         [3]uint8
 }
 
-const sockaddrVMSize = int32(unsafe.Sizeof(sockaddrVM{}))
-
-var (
-	modws2_32           = windows.NewLazySystemDLL("ws2_32.dll")
-	procBind            = modws2_32.NewProc("bind")
-	procListen          = modws2_32.NewProc("listen")
-	procAccept          = modws2_32.NewProc("accept")
-	procConnect         = modws2_32.NewProc("connect")
-	procRecv            = modws2_32.NewProc("recv")
-	procSend            = modws2_32.NewProc("send")
-	procWSAStartup      = modws2_32.NewProc("WSAStartup")
-	procWSAGetLastError = modws2_32.NewProc("WSAGetLastError")
-)
-
 // wsaLastError reads the per-thread Winsock error and returns it as a
 // syscall.Errno. Wrapped instead of x/sys/windows.WSAGetLastError to stay
 // portable across x/sys/windows API revisions.
@@ -74,19 +83,11 @@ func wsaLastError() error {
 	return syscall.Errno(r)
 }
 
-// socketError is the winsock SOCKET_ERROR sentinel (== -1 cast to unsigned).
-const socketError = ^uintptr(0)
-
-var (
-	wsaInitOnce sync.Once
-	wsaInitErr  error
-)
-
 func wsaInit() error {
 	wsaInitOnce.Do(func() {
 		var d windows.WSAData
 		// 0x0202 = MAKEWORD(2,2); ws2_32.WSAStartup returns 0 on success.
-		ret, _, _ := procWSAStartup.Call(0x0202, uintptr(unsafe.Pointer(&d))) //nolint:gosec // winsock requires sockaddr pointer
+		ret, _, _ := procWSAStartup.Call(0x0202, uintptr(unsafe.Pointer(&d))) //nolint:gosec // WSAStartup output param requires unsafe.Pointer
 		if ret != 0 {
 			wsaInitErr = fmt.Errorf("WSAStartup: %d", ret)
 		}
@@ -246,8 +247,6 @@ func (c *vsockConn) RemoteAddr() net.Addr {
 func (c *vsockConn) SetDeadline(_ time.Time) error      { return errDeadlineUnsupported }
 func (c *vsockConn) SetReadDeadline(_ time.Time) error  { return errDeadlineUnsupported }
 func (c *vsockConn) SetWriteDeadline(_ time.Time) error { return errDeadlineUnsupported }
-
-var errDeadlineUnsupported = errors.New("vsock: deadline unsupported on windows")
 
 type vsockAddr struct {
 	cid, port uint32

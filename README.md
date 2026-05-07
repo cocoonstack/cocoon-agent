@@ -74,6 +74,24 @@ Verify it's running:
 Get-Service cocoon-agent           # should show Running
 ```
 
+### Pipe-mode limitations on Windows
+
+Until ConPTY support lands (planned v0.3), the agent runs child processes
+with pipe stdin/stdout/stderr only. Windows console programs that bypass
+stdout pipes via the Console API (`WriteConsoleW` etc.) won't have their
+output captured. In practice:
+
+- ✅ `cmd /c "<thing>"`, batch scripts, and most CLI tools that write via
+  the C runtime work normally.
+- ✅ `powershell.exe -Command "<X> | Out-File <path>"` works.
+- ⚠️ `powershell.exe -Command "<X>"` may produce partial output for cmdlets
+  that render directly to the console.
+- ❌ TUI programs (`vim`, `far`, `htop`-style) and the interactive
+  `powershell.exe` REPL prompt are not visible — wait for v0.3 PTY mode.
+
+Pipe mode is sufficient for automation and scripted tasks; interactive
+shells need v0.3.
+
 ## Smoke test from the host
 
 cocoon-agent ships a `client` subcommand for vsock smoke tests without needing to plumb through cocoon CLI / vk-cocoon. Get the VM's CID from `cocoon vm inspect` and run:
