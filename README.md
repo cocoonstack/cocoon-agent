@@ -39,14 +39,15 @@ See [`agent/protocol.go`](agent/protocol.go) for the complete schema.
 ## Build
 
 ```bash
-make build              # local build
-GOOS=linux make build   # cross-compile for guest (amd64)
-GOOS=linux GOARCH=arm64 make build
+make build                                # local build
+GOOS=linux GOARCH=amd64 make build        # linux guest, x86_64
+GOOS=linux GOARCH=arm64 make build        # linux guest, arm64
+GOOS=windows GOARCH=amd64 make build      # windows guest → cocoon-agent-windows-amd64.exe
 ```
 
-## Install in a guest
+## Install in a Linux guest
 
-cocoon-agent is intended to be baked into Cocoon-managed images alongside the existing OCI bundles in [cocoon/os-image](https://github.com/cocoonstack/cocoon/tree/master/os-image):
+cocoon-agent is baked into Cocoon-managed images alongside the existing OCI bundles in [cocoon/os-image](https://github.com/cocoonstack/cocoon/tree/master/os-image):
 
 ```dockerfile
 COPY cocoon-agent /usr/local/bin/cocoon-agent
@@ -55,6 +56,23 @@ RUN systemctl enable cocoon-agent.service
 ```
 
 The systemd unit is in [`packaging/cocoon-agent.service`](packaging/cocoon-agent.service).
+
+## Install in a Windows guest
+
+Windows support requires the `viosock` driver shipped with **virtio-win >= 0.1.285** (Microsoft-attestation signed for Windows 10+). Cocoon's stock Windows images include it. The agent uses the same vsock port (1024) and wire protocol as the Linux build — host-side callers don't need to know which guest OS they're talking to.
+
+```powershell
+# Run elevated. Idempotent.
+.\install-cocoon-agent.ps1
+```
+
+The script copies `cocoon-agent.exe` to `C:\Program Files\Cocoon\`, registers a Windows service (`cocoon-agent`, `LocalSystem`, auto-start, restart-on-crash), and starts it. See [`packaging/install-cocoon-agent.ps1`](packaging/install-cocoon-agent.ps1).
+
+Verify it's running:
+
+```powershell
+Get-Service cocoon-agent           # should show Running
+```
 
 ## Smoke test from the host
 
@@ -85,9 +103,9 @@ CLI flags:
 
 | Version | Scope |
 |---|---|
-| v0.1 (current) | exec, stdin streaming, stdout/stderr, exit code; vsock listener; cobra CLI |
-| v0.2 | PTY mode (`tty: true`), window resize messages, signal forwarding |
-| v0.3 | Windows guest support (`vsock-windows` driver), MSI installer |
+| v0.1 | exec, stdin streaming, stdout/stderr, exit code; vsock listener; cobra CLI (linux only) |
+| v0.2 (current) | Windows guest support (AF_VSOCK via viosock); PowerShell service installer |
+| v0.3 | PTY mode (`tty: true`), window resize messages, signal forwarding |
 | v0.4 | Streaming `cocoon vm exec` host-side adapter (subprocess-friendly for vk-cocoon `RunInContainer`) |
 
 ## Related
@@ -101,7 +119,7 @@ CLI flags:
 ```bash
 make all          # tidy + fmt + lint + test + build
 make test         # go test -race -cover
-make lint         # golangci-lint on linux + darwin
+make lint         # golangci-lint on linux + darwin + windows
 make fmt-check    # gofumpt + goimports check
 make help         # full target list
 ```

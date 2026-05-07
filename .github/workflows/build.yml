@@ -19,6 +19,8 @@ jobs:
             goarch: amd64
           - goos: linux
             goarch: arm64
+          - goos: windows
+            goarch: amd64
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -43,5 +45,5 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: cocoon-agent-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: cocoon-agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: cocoon-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }}
           retention-days: 30

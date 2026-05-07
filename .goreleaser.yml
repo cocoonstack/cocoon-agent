@@ -35,6 +35,21 @@ builds:
       - arm64
     main: .
 
+  - id: cocoon-agent-windows
+    binary: cocoon-agent
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s
+      - -X github.com/cocoonstack/cocoon-agent/version.REVISION={{.Commit}}
+      - -X github.com/cocoonstack/cocoon-agent/version.VERSION={{.Env.VERSION}}
+      - -X github.com/cocoonstack/cocoon-agent/version.BUILTAT={{.Date}}
+    goos:
+      - windows
+    goarch:
+      - amd64
+    main: .
+
 archives:
   - id: release
     builds:
@@ -46,6 +61,18 @@ archives:
       {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end -}}
+
+  - id: release-windows
+    builds:
+      - cocoon-agent-windows
+    formats: [zip]
+    files:
+      - packaging/install-cocoon-agent.ps1
+    name_template: >-
+      {{- .ProjectName }}_{{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end -}}
 
   - id: debug
     builds:
