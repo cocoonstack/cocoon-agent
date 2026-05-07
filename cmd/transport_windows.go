@@ -26,22 +26,16 @@ import (
 )
 
 const (
-	// afVsock is the address family registered by the viosock Winsock
-	// provider. Same numeric value as Linux AF_VSOCK so cocoon's host-side
-	// hybrid-vsock framing works unchanged.
+	// afVsock matches Linux AF_VSOCK so the wire protocol is identical
+	// across guests; viosock registers the same number on Windows.
 	afVsock = 40
 
-	// vmAddrCidHost / vmAddrCidAny mirror the Linux constants. We only
-	// accept connections originating from the host (CID=2) — guest-local
-	// callers shouldn't be able to drive the agent.
+	// host-only filter: only host-originated peers may drive the agent.
 	vmAddrCidHost = 2
 	vmAddrCidAny  = 0xFFFFFFFF
 
-	// sockaddrVMSize is the on-wire byte size of struct sockaddr_vm (16).
 	sockaddrVMSize = int32(unsafe.Sizeof(sockaddrVM{}))
-
-	// socketError is the winsock SOCKET_ERROR sentinel (== -1 cast to unsigned).
-	socketError = ^uintptr(0)
+	socketError    = ^uintptr(0) // winsock SOCKET_ERROR
 )
 
 var (
@@ -72,9 +66,8 @@ type sockaddrVM struct {
 	_         [3]uint8
 }
 
-// wsaLastError reads the per-thread Winsock error and returns it as a
-// syscall.Errno. Wrapped instead of x/sys/windows.WSAGetLastError to stay
-// portable across x/sys/windows API revisions.
+// wsaLastError returns the per-thread Winsock error as a syscall.Errno;
+// x/sys/windows v0.15 doesn't export WSAGetLastError, hence the LazyProc.
 func wsaLastError() error {
 	r, _, _ := procWSAGetLastError.Call()
 	if r == 0 {
@@ -89,7 +82,7 @@ func wsaInit() error {
 		// 0x0202 = MAKEWORD(2,2); ws2_32.WSAStartup returns 0 on success.
 		ret, _, _ := procWSAStartup.Call(0x0202, uintptr(unsafe.Pointer(&d))) //nolint:gosec // WSAStartup output param requires unsafe.Pointer
 		if ret != 0 {
-			wsaInitErr = fmt.Errorf("WSAStartup: %d", ret)
+			wsaInitErr = fmt.Errorf("wsastartup: %d", ret)
 		}
 	})
 	return wsaInitErr
@@ -101,7 +94,7 @@ func listenVsock(port uint32) (net.Listener, error) {
 	}
 	h, err := windows.Socket(afVsock, windows.SOCK_STREAM, 0)
 	if err != nil {
-		return nil, fmt.Errorf("vsock socket: %w (is the viosock driver loaded? requires virtio-win >= 0.1.285)", err)
+		return nil, fmt.Errorf("vsock socket: %w", err)
 	}
 	sa := sockaddrVM{Family: afVsock, Port: port, CID: vmAddrCidAny}
 	r, _, _ := procBind.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock bind requires raw pointer
@@ -220,6 +213,10 @@ func (c *vsockConn) Write(p []byte) (int, error) {
 			}
 			return total, fmt.Errorf("vsock send: %w", wsaLastError())
 		}
+		if r == 0 {
+			// Guard against the undocumented send() == 0 case so we don't spin.
+			return total, io.ErrShortWrite
+		}
 		total += int(r)
 	}
 	return total, nil
@@ -240,10 +237,9 @@ func (c *vsockConn) RemoteAddr() net.Addr {
 	return &vsockAddr{cid: c.peerCID, port: c.peerPort}
 }
 
-// SetDeadline / SetReadDeadline / SetWriteDeadline are best-effort no-ops:
-// blocking winsock recv/send is interrupted by Closesocket, which is what the
-// agent's shutdown path uses. If we ever need real per-call timeouts we can
-// switch to overlapped I/O via WSARecv/WSASend.
+// Deadlines are unsupported: agent shutdown uses Closesocket to unblock
+// recv/send, which is sufficient. Switch to overlapped I/O if real
+// per-call timeouts ever become a requirement.
 func (c *vsockConn) SetDeadline(_ time.Time) error      { return errDeadlineUnsupported }
 func (c *vsockConn) SetReadDeadline(_ time.Time) error  { return errDeadlineUnsupported }
 func (c *vsockConn) SetWriteDeadline(_ time.Time) error { return errDeadlineUnsupported }

@@ -34,9 +34,13 @@ $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existing -and $existing.Status -ne 'Stopped') {
     Write-Step "stopping existing $ServiceName"
     Stop-Service -Name $ServiceName -Force
-    # Wait until SCM agrees it's stopped — Stop-Service can return before
-    # the process actually exits, leaving the .exe locked for replacement.
+    # Stop-Service can return before the process actually exits, so wait
+    # for SCM to confirm; bounded so a wedged SCM can't hang the installer.
+    $deadline = (Get-Date).AddSeconds(30)
     while ((Get-Service -Name $ServiceName).Status -ne 'Stopped') {
+        if ((Get-Date) -ge $deadline) {
+            throw "service $ServiceName did not stop within 30s; SCM may be wedged"
+        }
         Start-Sleep -Milliseconds 200
     }
 }
@@ -58,8 +62,9 @@ if ($existing) {
     Write-Step "creating service $ServiceName"
     & sc.exe create $ServiceName binPath= "$binPath" start= auto DisplayName= "$DisplayName" | Out-Null
     & sc.exe description $ServiceName "$Description" | Out-Null
-    # Restart on crash: 5s/5s/5s, reset failure count after 60s
-    & sc.exe failure $ServiceName reset= 60 actions= restart/5000/restart/5000/restart/5000 | Out-Null
+    # 24h reset window mirrors Linux's Restart=always intent — a flapping
+    # bug self-heals instead of permanently bricking the agent.
+    & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
 }
 
 # 4. start
@@ -84,4 +89,5 @@ if ($null -eq $viosock) {
 
 Write-Host ""
 Write-Host "cocoon-agent installed and running on vsock port $Port" -ForegroundColor Green
-Write-Host "logs: Get-EventLog -LogName Application -Source $ServiceName  (or check stdout/stderr via the service binary directly)"
+Write-Host "status: Get-Service $ServiceName"
+Write-Host "stop:   Stop-Service $ServiceName"
