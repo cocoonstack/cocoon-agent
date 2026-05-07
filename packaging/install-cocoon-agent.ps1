@@ -53,30 +53,47 @@ $BinaryDest = Join-Path $InstallDir 'cocoon-agent.exe'
 Write-Step "copying binary to $BinaryDest"
 Copy-Item -Path $BinarySource -Destination $BinaryDest -Force
 
-# 3. create or update the service
+# 3. create or update the service.
+#
+# sc.exe demands "key= value" with a literal space after `=`, but PowerShell's
+# native invocation splits "binPath=" into one arg and "$binPath" into another,
+# producing 1639 INVALID_COMMAND_LINE. Routing through cmd.exe preserves the
+# literal "key= value" tokens. cmd.exe is unconditionally available on every
+# supported Windows SKU, so this is portable.
 $binPath = "`"$BinaryDest`" serve --port $Port"
 if ($existing) {
     Write-Step "updating service $ServiceName binPath"
-    & sc.exe config $ServiceName binPath= "$binPath" start= auto | Out-Null
+    & cmd.exe /c "sc.exe config $ServiceName binPath= `"$binPath`" start= auto" | Out-Null
 } else {
     Write-Step "creating service $ServiceName"
-    & sc.exe create $ServiceName binPath= "$binPath" start= auto DisplayName= "$DisplayName" | Out-Null
-    & sc.exe description $ServiceName "$Description" | Out-Null
+    & cmd.exe /c "sc.exe create $ServiceName binPath= `"$binPath`" start= auto DisplayName= `"$DisplayName`"" | Out-Null
+    & cmd.exe /c "sc.exe description $ServiceName `"$Description`"" | Out-Null
     # 24h reset window mirrors Linux's Restart=always intent — a flapping
     # bug self-heals instead of permanently bricking the agent.
-    & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
+    & cmd.exe /c "sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000/restart/5000" | Out-Null
 }
 
-# 4. start
+# Confirm registration before attempting Start-Service; otherwise an SCM hiccup
+# in step 3 would surface here as a misleading "service not found" error.
+$svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($null -eq $svc) {
+    throw "service $ServiceName did not register; check that you ran elevated"
+}
+
+# 4. start. Tolerate Start-Service failure when the viosock device is absent —
+# image-build VMs typically have no vsock device, so the agent can't listen yet.
+# The service is registered with start=auto, so production CH (which exposes
+# the vsock device) will start it automatically on boot.
 Write-Step "starting $ServiceName"
-Start-Service -Name $ServiceName
+try {
+    Start-Service -Name $ServiceName -ErrorAction Stop
+} catch {
+    Write-Warning "Start-Service failed (typical when no vsock device is present in the build VM; production CH provides one): $_"
+}
 
 # 5. verify
 $svc = Get-Service -Name $ServiceName
 Write-Host "Service status: $($svc.Status)"
-if ($svc.Status -ne 'Running') {
-    throw "service $ServiceName did not reach Running state (got $($svc.Status))"
-}
 
 # Best-effort sanity check: the service is up and viosock is loaded.
 $viosock = Get-PnpDevice -PresentOnly:$true -Class "System" -ErrorAction SilentlyContinue |

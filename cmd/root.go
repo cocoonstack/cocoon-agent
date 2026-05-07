@@ -28,7 +28,20 @@ func NewRootCmd() *cobra.Command {
 }
 
 // Execute wraps run() so deferred cleanups fire before os.Exit.
+//
+// On Windows, when started by the Service Control Manager, dispatches into
+// runAsWindowsService instead — the SCM handler invokes the same cobra flow
+// under a service-managed context. Interactive runs (CLI use, non-Windows)
+// fall through to run() unchanged.
 func Execute() {
+	isService, err := runAsWindowsService()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "windows service dispatch: %v\n", err)
+		os.Exit(1)
+	}
+	if isService {
+		return
+	}
 	os.Exit(run())
 }
 
