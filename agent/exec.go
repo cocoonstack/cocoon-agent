@@ -7,15 +7,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sync"
 )
 
-// runExec runs argv against the framed channel, returning when the child
-// exits or the wire dies. Empty argv → MsgError with no MsgExit. env is
-// merged on top of os.Environ (caller keys win).
-func runExec(parentCtx context.Context, argv []string, env map[string]string, stdinFrames <-chan Message, enc *Encoder, encMu *sync.Mutex) error {
+// runExec runs argv to completion, framing stdout/stderr/exit onto enc.
+// Empty argv → MsgError with no MsgExit; env is merged on top of os.Environ
+// with caller keys winning.
+func runExec(parentCtx context.Context, argv []string, env map[string]string, stdinFrames <-chan Message, enc *Encoder) error {
 	if len(argv) == 0 {
-		return sendErrorf(enc, encMu, "exec: argv is empty")
+		return enc.SendErrorf("exec: argv is empty")
 	}
 
 	// Inner ctx so an encoder failure can kill the child via
@@ -31,24 +30,24 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
-		return sendErrorf(enc, encMu, "exec: open stdin pipe: %v", err)
+		return enc.SendErrorf("exec: open stdin pipe: %v", err)
 	}
 	// cmd.Stdout/Stderr (vs StdoutPipe/StderrPipe) lets cmd.Wait drain
 	// before returning. The pipe-based API closes the parent read fd as
 	// soon as the child exits, racing the pump's last read.
-	stdoutW := newFramedWriter(MsgStdout, enc, encMu, cancel)
-	stderrW := newFramedWriter(MsgStderr, enc, encMu, cancel)
+	stdoutW := newFramedWriter(MsgStdout, enc, cancel)
+	stderrW := newFramedWriter(MsgStderr, enc, cancel)
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
 
 	if err := cmd.Start(); err != nil {
 		_ = stdinPipe.Close()
-		return sendErrorf(enc, encMu, "exec: start %s: %v", argv[0], err)
+		return enc.SendErrorf("exec: start %s: %v", argv[0], err)
 	}
-	if err := sendLocked(enc, encMu, Message{Type: MsgStarted, PID: cmd.Process.Pid}); err != nil {
-		// Wire is dead; kill the child via ctx and reap it so we don't
-		// leave a zombie, then surface the original encoder error rather
-		// than masking it with the inevitable downstream MsgExit failure.
+	if err := enc.Encode(Message{Type: MsgStarted, PID: cmd.Process.Pid}); err != nil {
+		// Wire is dead; kill+reap to avoid a zombie, then surface the
+		// original encoder error rather than masking it with the inevitable
+		// downstream MsgExit failure.
 		cancel()
 		_ = cmd.Wait()
 		_ = stdinPipe.Close()
@@ -59,10 +58,9 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	go pumpStdin(ctx, stdinPipe, stdinFrames, stdinDone)
 
 	waitErr := cmd.Wait()
-	// Child is gone; cancel so the stdin pump unblocks even if the
-	// client never sent MsgStdinClose (e.g. interactive TTY caller
-	// whose pumpStdin is wedged on os.Stdin.Read). Without this we'd
-	// hang here and never deliver MsgExit.
+	// Child is gone; cancel so the stdin pump unblocks even if the client
+	// never sent MsgStdinClose (e.g. interactive TTY caller whose pumpStdin
+	// is wedged on os.Stdin.Read). Without this we'd hang here forever.
 	cancel()
 	<-stdinDone
 
@@ -79,16 +77,15 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	case errors.As(waitErr, &exitErr):
 		exitCode = exitErr.ExitCode()
 	default:
-		return sendErrorf(enc, encMu, "exec: wait %s: %v", argv[0], waitErr)
+		return enc.SendErrorf("exec: wait %s: %v", argv[0], waitErr)
 	}
 
-	return sendLocked(enc, encMu, Message{Type: MsgExit, ExitCode: exitCode})
+	return enc.Encode(Message{Type: MsgExit, ExitCode: exitCode})
 }
 
 // pumpStdin drains stdin frames into the child's pipe; returns on
-// MsgStdinClose, channel close, ctx cancel (child exited), or write error.
-// Write errors are silent — child closing stdin early is normal (e.g.
-// `head -1`).
+// MsgStdinClose, channel close, ctx cancel, or write error. Write errors
+// are silent — child closing stdin early is normal (e.g. `head -1`).
 func pumpStdin(ctx context.Context, w io.WriteCloser, frames <-chan Message, done chan<- struct{}) {
 	defer close(done)
 	defer w.Close() //nolint:errcheck
@@ -108,16 +105,6 @@ func pumpStdin(ctx context.Context, w io.WriteCloser, frames <-chan Message, don
 			}
 		}
 	}
-}
-
-func sendLocked(enc *Encoder, mu *sync.Mutex, m Message) error {
-	mu.Lock()
-	defer mu.Unlock()
-	return enc.Encode(m)
-}
-
-func sendErrorf(enc *Encoder, mu *sync.Mutex, format string, args ...any) error {
-	return sendLocked(enc, mu, Message{Type: MsgError, Message: fmt.Sprintf(format, args...)})
 }
 
 // mergeEnv layers caller env over os.Environ; caller keys win on collision.

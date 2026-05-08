@@ -14,35 +14,38 @@ import (
 	"github.com/cocoonstack/cocoon-agent/client"
 )
 
-// newLoopbackServer runs the agent over loopback TCP so tests don't need vsock.
-func newLoopbackServer(t *testing.T) (*agent.Server, string) {
+// dialTestServer runs the agent over loopback TCP and dials a client conn.
+// Cleanup (cancel ctx, close server, wait for Serve to return, close conn)
+// is registered via t.Cleanup so callers don't repeat it per test.
+func dialTestServer(t *testing.T) (context.Context, net.Conn) {
 	t.Helper()
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen tcp: %v", err)
 	}
-	return agent.NewServer(tcp), tcp.Addr().String()
+	srv := agent.NewServer(tcp)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
+	var wg sync.WaitGroup
+	wg.Go(func() { _ = srv.Serve(ctx) })
+	conn, err := net.Dial("tcp", tcp.Addr().String())
+	if err != nil {
+		cancel()
+		_ = srv.Close()
+		wg.Wait()
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		_ = srv.Close()
+		wg.Wait()
+		_ = conn.Close()
+	})
+	return ctx, conn
 }
 
 func TestServerExecHelloWorld(t *testing.T) {
 	t.Parallel()
-
-	srv, addr := newLoopbackServer(t)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
-	defer cancel()
-
-	var serveWG sync.WaitGroup
-	serveWG.Go(func() { _ = srv.Serve(ctx) })
-	defer func() {
-		_ = srv.Close()
-		serveWG.Wait()
-	}()
-
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	ctx, conn := dialTestServer(t)
 
 	var stdout, stderr bytes.Buffer
 	exit, err := client.Run(ctx, conn, []string{"sh", "-c", "echo hello && echo bye 1>&2"}, nil, nil, &stdout, &stderr)
@@ -62,17 +65,8 @@ func TestServerExecHelloWorld(t *testing.T) {
 
 func TestServerPropagatesNonZeroExit(t *testing.T) {
 	t.Parallel()
+	ctx, conn := dialTestServer(t)
 
-	srv, addr := newLoopbackServer(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
-	defer cancel()
-	go func() { _ = srv.Serve(ctx) }()
-	defer srv.Close() //nolint:errcheck
-
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
 	exit, err := client.Run(ctx, conn, []string{"sh", "-c", "exit 7"}, nil, nil, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("client run: %v", err)
@@ -84,17 +78,8 @@ func TestServerPropagatesNonZeroExit(t *testing.T) {
 
 func TestServerStreamsStdin(t *testing.T) {
 	t.Parallel()
+	ctx, conn := dialTestServer(t)
 
-	srv, addr := newLoopbackServer(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
-	defer cancel()
-	go func() { _ = srv.Serve(ctx) }()
-	defer srv.Close() //nolint:errcheck
-
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
 	var stdout bytes.Buffer
 	exit, err := client.Run(ctx, conn, []string{"cat"}, nil, strings.NewReader("hello-stdin\n"), &stdout, io.Discard)
 	if err != nil {
@@ -110,21 +95,10 @@ func TestServerStreamsStdin(t *testing.T) {
 
 func TestServerRejectsNonExecFirstFrame(t *testing.T) {
 	t.Parallel()
-
-	srv, addr := newLoopbackServer(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
-	defer cancel()
-	go func() { _ = srv.Serve(ctx) }()
-	defer srv.Close() //nolint:errcheck
-
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.Close() //nolint:errcheck
+	_, conn := dialTestServer(t)
 
 	enc := agent.NewEncoder(conn)
-	if err = enc.Encode(agent.Message{Type: agent.MsgStdin, Data: []byte("nope")}); err != nil {
+	if err := enc.Encode(agent.Message{Type: agent.MsgStdin, Data: []byte("nope")}); err != nil {
 		t.Fatalf("encode bogus first frame: %v", err)
 	}
 	dec := agent.NewDecoder(conn)
@@ -139,18 +113,9 @@ func TestServerRejectsNonExecFirstFrame(t *testing.T) {
 
 func TestServerNonexistentCommand(t *testing.T) {
 	t.Parallel()
+	ctx, conn := dialTestServer(t)
 
-	srv, addr := newLoopbackServer(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
-	defer cancel()
-	go func() { _ = srv.Serve(ctx) }()
-	defer srv.Close() //nolint:errcheck
-
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	_, err = client.Run(ctx, conn, []string{"/does-not-exist-binary"}, nil, nil, io.Discard, io.Discard)
+	_, err := client.Run(ctx, conn, []string{"/does-not-exist-binary"}, nil, nil, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected error for nonexistent command, got nil")
 	}
@@ -164,24 +129,12 @@ func TestServerNonexistentCommand(t *testing.T) {
 // be papered over as a clean child stdin EOF.
 func TestServerRejectsMalformedStdinFrame(t *testing.T) {
 	t.Parallel()
-
-	srv, addr := newLoopbackServer(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
-	defer cancel()
-	go func() { _ = srv.Serve(ctx) }()
-	defer srv.Close() //nolint:errcheck
-
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.Close() //nolint:errcheck
+	_, conn := dialTestServer(t)
 
 	enc := agent.NewEncoder(conn)
 	if err := enc.Encode(agent.Message{Type: agent.MsgExec, Argv: []string{"cat"}}); err != nil {
 		t.Fatalf("encode exec: %v", err)
 	}
-	// Inject a non-JSON line where a frame is expected.
 	if _, err := conn.Write([]byte("not-json\n")); err != nil {
 		t.Fatalf("inject malformed: %v", err)
 	}
@@ -208,20 +161,10 @@ func TestServerRejectsMalformedStdinFrame(t *testing.T) {
 // behind a successful exit code.
 func TestClientPropagatesStdinReadError(t *testing.T) {
 	t.Parallel()
-
-	srv, addr := newLoopbackServer(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
-	defer cancel()
-	go func() { _ = srv.Serve(ctx) }()
-	defer srv.Close() //nolint:errcheck
-
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	ctx, conn := dialTestServer(t)
 
 	failingStdin := &erroringReader{after: 5, err: io.ErrUnexpectedEOF, payload: []byte("hello")}
-	_, err = client.Run(ctx, conn, []string{"cat"}, nil, failingStdin, io.Discard, io.Discard)
+	_, err := client.Run(ctx, conn, []string{"cat"}, nil, failingStdin, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected error to propagate from broken local stdin")
 	}
@@ -247,17 +190,8 @@ func (r *erroringReader) Read(p []byte) (int, error) {
 
 func TestServerMergesEnvWithHost(t *testing.T) {
 	t.Parallel()
+	ctx, conn := dialTestServer(t)
 
-	srv, addr := newLoopbackServer(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
-	defer cancel()
-	go func() { _ = srv.Serve(ctx) }()
-	defer srv.Close() //nolint:errcheck
-
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
 	var stdout bytes.Buffer
 	exit, err := client.Run(
 		ctx, conn,

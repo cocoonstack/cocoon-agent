@@ -35,9 +35,8 @@ func NewServer(listener net.Listener) *Server {
 }
 
 // Serve accepts until ctx is canceled or the listener errors permanently.
-// On shutdown it closes the listener AND every in-flight conn so a slow
-// or non-reading peer can't hold framedWriter.Write hostage and pin
-// connWG.Wait below.
+// Shutdown closes both the listener and every in-flight conn so a slow
+// peer can't pin framedWriter.Write and stall connWG.Wait.
 func (s *Server) Serve(ctx context.Context) error {
 	logger := log.WithFunc("agent.Server.Serve")
 	logger.Infof(ctx, "agent listening on %s", s.listener.Addr())
@@ -59,17 +58,13 @@ func (s *Server) Serve(ctx context.Context) error {
 			logger.Error(ctx, err, "accept")
 			return fmt.Errorf("accept: %w", err)
 		}
-		connWG.Add(1)
-		go func(c net.Conn) {
-			defer connWG.Done()
-			s.handleConn(ctx, c)
-		}(conn)
+		connWG.Go(func() { s.handleConn(ctx, conn) })
 	}
 }
 
-// Close stops the accept loop and tears down every in-flight session.
-// Symmetric with the ctx-cancel shutdown path so callers using Close()
-// as the shutdown API don't get a Serve that hangs on slow peers.
+// Close stops the accept loop and tears down every in-flight session,
+// matching the ctx-cancel shutdown path so Close-as-shutdown can't hang
+// on slow peers.
 func (s *Server) Close() error {
 	err := s.listener.Close()
 	s.closeAllConns()
@@ -84,7 +79,6 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	dec := NewDecoder(conn)
 	enc := NewEncoder(conn)
-	var encMu sync.Mutex
 
 	first, err := dec.Decode()
 	if err != nil {
@@ -94,7 +88,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 	if first.Type != MsgExec {
-		if err := sendErrorf(enc, &encMu, "expected first frame type %q, got %q", MsgExec, first.Type); err != nil {
+		if err := enc.SendErrorf("expected first frame type %q, got %q", MsgExec, first.Type); err != nil {
 			logger.Warnf(ctx, "send rejection error frame to %s: %v", conn.RemoteAddr(), err)
 		}
 		return
@@ -114,11 +108,9 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			frame, err := dec.Decode()
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
-					// Don't let protocol corruption (malformed JSON,
-					// over-limit frame, mid-stream truncation) become
-					// a clean child stdin EOF — surface it as MsgError
-					// and kill the child.
-					_ = sendErrorf(enc, &encMu, "stdin: %v", err)
+					// Surface protocol corruption as MsgError + kill the
+					// child rather than masquerading as a clean stdin EOF.
+					_ = enc.SendErrorf("stdin: %v", err)
 					execCancel()
 				}
 				return
@@ -134,10 +126,10 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		}
 	}()
 
-	if err := runExec(execCtx, first.Argv, first.Env, stdinFrames, enc, &encMu); err != nil {
-		logger.Warnf(ctx, "exec session ended with error: %v", err)
+	if err := runExec(execCtx, first.Argv, first.Env, stdinFrames, enc); err != nil {
+		logger.Warnf(ctx, "exec session ended: %v", err)
 	}
-	// Close conn so the stdin goroutine's blocking Decode returns;
+	// Close conn so the stdin goroutine's blocking Decode returns —
 	// otherwise it leaks until the client side closes first.
 	_ = conn.Close()
 	<-stdinDone

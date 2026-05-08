@@ -26,9 +26,9 @@ const (
 	MsgExit    = "exit"
 	MsgError   = "error"
 
-	// frameMaxBuf caps a single frame so a malformed peer can't OOM us.
 	frameInitBuf = 64 * 1024
-	frameMaxBuf  = 8 * 1024 * 1024
+	// frameMaxBuf caps a single frame so a malformed peer can't OOM us.
+	frameMaxBuf = 8 * 1024 * 1024
 )
 
 // Message is the union of all frames. Only fields relevant to Type are populated.
@@ -69,10 +69,11 @@ func (d *Decoder) Decode() (Message, error) {
 	return m, nil
 }
 
-// Encoder is not goroutine-safe; serialize via an external mutex when
-// multiple writers share one (see framedWriter / sendLocked).
+// Encoder serializes Encode calls so multiple writers (stdout/stderr pumps,
+// stdin protocol-error path) can share one without an external mutex.
 type Encoder struct {
-	w io.Writer
+	mu sync.Mutex
+	w  io.Writer
 }
 
 // NewEncoder returns an Encoder writing newline-delimited JSON frames to w.
@@ -87,10 +88,17 @@ func (e *Encoder) Encode(m Message) error {
 		return fmt.Errorf("encode frame: %w", err)
 	}
 	buf = append(buf, '\n')
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if _, err := e.w.Write(buf); err != nil {
 		return fmt.Errorf("write frame: %w", err)
 	}
 	return nil
+}
+
+// SendErrorf encodes a MsgError frame with a formatted message body.
+func (e *Encoder) SendErrorf(format string, args ...any) error {
+	return e.Encode(Message{Type: MsgError, Message: fmt.Sprintf(format, args...)})
 }
 
 // framedWriter adapts io.Writer onto framed messages so it can drive
@@ -99,23 +107,21 @@ func (e *Encoder) Encode(m Message) error {
 type framedWriter struct {
 	msgType string
 	enc     *Encoder
-	mu      *sync.Mutex
 	cancel  context.CancelFunc
 	lastErr atomic.Pointer[error]
 }
 
-func newFramedWriter(msgType string, enc *Encoder, mu *sync.Mutex, cancel context.CancelFunc) *framedWriter {
-	return &framedWriter{msgType: msgType, enc: enc, mu: mu, cancel: cancel}
+func newFramedWriter(msgType string, enc *Encoder, cancel context.CancelFunc) *framedWriter {
+	return &framedWriter{msgType: msgType, enc: enc, cancel: cancel}
 }
 
 func (w *framedWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	// p is safe to alias here: sendLocked → Encode → json.Marshal copies
-	// Data into its own buffer before returning, and exec.Cmd's I/O pump
-	// won't reuse p until Write returns.
-	if err := sendLocked(w.enc, w.mu, Message{Type: w.msgType, Data: p}); err != nil {
+	// p is safe to alias: Encode → json.Marshal copies Data before returning;
+	// exec.Cmd's I/O pump doesn't reuse p until this Write returns.
+	if err := w.enc.Encode(Message{Type: w.msgType, Data: p}); err != nil {
 		errCopy := err
 		if w.lastErr.CompareAndSwap(nil, &errCopy) && w.cancel != nil {
 			w.cancel()
