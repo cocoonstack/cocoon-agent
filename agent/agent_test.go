@@ -33,11 +33,7 @@ func TestServerExecHelloWorld(t *testing.T) {
 	defer cancel()
 
 	var serveWG sync.WaitGroup
-	serveWG.Add(1)
-	go func() {
-		defer serveWG.Done()
-		_ = srv.Serve(ctx)
-	}()
+	serveWG.Go(func() { _ = srv.Serve(ctx) })
 	defer func() {
 		_ = srv.Close()
 		serveWG.Wait()
@@ -128,7 +124,7 @@ func TestServerRejectsNonExecFirstFrame(t *testing.T) {
 	defer conn.Close() //nolint:errcheck
 
 	enc := agent.NewEncoder(conn)
-	if err := enc.Encode(agent.Message{Type: agent.MsgStdin, Data: []byte("nope")}); err != nil {
+	if err = enc.Encode(agent.Message{Type: agent.MsgStdin, Data: []byte("nope")}); err != nil {
 		t.Fatalf("encode bogus first frame: %v", err)
 	}
 	dec := agent.NewDecoder(conn)

@@ -10,6 +10,8 @@ import (
 	"github.com/mdlayher/vsock"
 )
 
+var _ net.Listener = (*hostOnlyListener)(nil)
+
 func listenVsock(port uint32) (net.Listener, error) {
 	l, err := vsock.Listen(port, nil)
 	if err != nil {

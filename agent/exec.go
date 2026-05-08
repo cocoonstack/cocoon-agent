@@ -46,7 +46,13 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 		return sendErrorf(enc, encMu, "exec: start %s: %v", argv[0], err)
 	}
 	if err := sendLocked(enc, encMu, Message{Type: MsgStarted, PID: cmd.Process.Pid}); err != nil {
+		// Wire is dead; kill the child via ctx and reap it so we don't
+		// leave a zombie, then surface the original encoder error rather
+		// than masking it with the inevitable downstream MsgExit failure.
 		cancel()
+		_ = cmd.Wait()
+		_ = stdinPipe.Close()
+		return fmt.Errorf("send started frame: %w", err)
 	}
 
 	stdinDone := make(chan struct{})

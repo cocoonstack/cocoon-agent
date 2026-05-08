@@ -53,6 +53,10 @@ var (
 	wsaInitErr  error
 
 	errDeadlineUnsupported = errors.New("vsock: deadline unsupported on windows")
+
+	_ net.Listener = (*vsockListener)(nil)
+	_ net.Conn     = (*vsockConn)(nil)
+	_ net.Addr     = (*vsockAddr)(nil)
 )
 
 // sockaddrVM matches `struct sockaddr_vm` exactly (16 bytes). Field order
@@ -68,10 +72,14 @@ type sockaddrVM struct {
 
 // wsaLastError returns the per-thread Winsock error as a syscall.Errno;
 // x/sys/windows v0.15 doesn't export WSAGetLastError, hence the LazyProc.
+// Always returns non-nil: callers invoke this only after a SOCKET_ERROR
+// return, so a 0 from WSAGetLastError means the thread state was clobbered
+// (e.g. a concurrent winsock call) — surface that explicitly instead of
+// wrapping nil through %w.
 func wsaLastError() error {
 	r, _, _ := procWSAGetLastError.Call()
 	if r == 0 {
-		return nil
+		return errors.New("winsock: unknown error (WSAGetLastError returned 0)")
 	}
 	return syscall.Errno(r)
 }

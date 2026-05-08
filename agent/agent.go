@@ -94,7 +94,9 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 	if first.Type != MsgExec {
-		_ = sendErrorf(enc, &encMu, "expected first frame type %q, got %q", MsgExec, first.Type)
+		if err := sendErrorf(enc, &encMu, "expected first frame type %q, got %q", MsgExec, first.Type); err != nil {
+			logger.Warnf(ctx, "send rejection error frame to %s: %v", conn.RemoteAddr(), err)
+		}
 		return
 	}
 

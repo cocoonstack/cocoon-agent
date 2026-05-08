@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/projecteru2/core/log"
-	coretypes "github.com/projecteru2/core/types"
+	"github.com/projecteru2/core/types"
 )
 
 // setupLog reads AGENT_LOG_LEVEL (default info). File logging is off —
@@ -15,5 +15,5 @@ func setupLog(ctx context.Context) error {
 	if level == "" {
 		level = "info"
 	}
-	return log.SetupLog(ctx, &coretypes.ServerLogConfig{Level: level}, "")
+	return log.SetupLog(ctx, &types.ServerLogConfig{Level: level}, "")
 }
