@@ -10,6 +10,12 @@ import (
 	"github.com/cocoonstack/cocoon-agent/client"
 )
 
+// exitCodeError carries the child exit code through cobra's RunE so
+// Execute() can map it to os.Exit without short-circuiting defers.
+type exitCodeError struct{ code int }
+
+func (e *exitCodeError) Error() string { return fmt.Sprintf("exit code %d", e.code) }
+
 func newClientCmd() *cobra.Command {
 	var (
 		cid  uint32
@@ -43,9 +49,3 @@ func newClientCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("cid")
 	return cmd
 }
-
-// exitCodeError carries the child exit code through cobra's RunE so
-// Execute() can map it to os.Exit without short-circuiting defers.
-type exitCodeError struct{ code int }
-
-func (e *exitCodeError) Error() string { return fmt.Sprintf("exit code %d", e.code) }

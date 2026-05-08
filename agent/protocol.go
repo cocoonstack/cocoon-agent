@@ -135,14 +135,20 @@ func (w *framedWriter) Write(p []byte) (int, error) {
 	}
 	// p is safe to alias: Encode → json.Marshal copies Data before returning;
 	// exec.Cmd's I/O pump doesn't reuse p until this Write returns.
-	if err := w.enc.Encode(Message{Type: w.msgType, Data: p}); err != nil {
-		errCopy := err
-		if w.lastErr.CompareAndSwap(nil, &errCopy) && w.cancel != nil {
-			w.cancel()
-		}
+	err := w.enc.Encode(Message{Type: w.msgType, Data: p})
+	if err == nil {
+		return len(p), nil
+	}
+	// Skip errTerminalFrameSent — it's a session-ended race signal, not
+	// a write failure; let runExec's ctx-cause check handle cleanup.
+	if errors.Is(err, errTerminalFrameSent) {
 		return 0, err
 	}
-	return len(p), nil
+	errCopy := err
+	if w.lastErr.CompareAndSwap(nil, &errCopy) && w.cancel != nil {
+		w.cancel()
+	}
+	return 0, err
 }
 
 func (w *framedWriter) err() error {

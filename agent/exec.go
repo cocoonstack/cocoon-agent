@@ -9,6 +9,27 @@ import (
 	"os/exec"
 )
 
+// processController hooks platform-specific child-lifecycle steps into
+// runExec: AfterStart runs once cmd.Process exists (Windows assigns the
+// child to its Job Object); Close releases any held kernel resource.
+type processController struct {
+	afterStart func(*exec.Cmd) error
+	close      func()
+}
+
+func (c processController) AfterStart(cmd *exec.Cmd) error {
+	if c.afterStart == nil {
+		return nil
+	}
+	return c.afterStart(cmd)
+}
+
+func (c processController) Close() {
+	if c.close != nil {
+		c.close()
+	}
+}
+
 // runExec runs argv to completion, framing stdout/stderr/exit onto enc.
 // Empty argv → MsgError with no MsgExit; env is merged on top of os.Environ
 // with caller keys winning.
@@ -50,10 +71,12 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	}
 	if err := procCtl.AfterStart(cmd); err != nil {
 		cancel()
+		// Child isn't in the Windows Job Object yet, so cancel doesn't reach
+		// it via CloseHandle(job); explicit Kill is required.
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		_ = stdinPipe.Close()
-		return enc.SendErrorf("exec: setup process %s: %v", argv[0], err)
+		return enc.SendErrorf("exec: assign process %s: %v", argv[0], err)
 	}
 	if err := enc.Encode(Message{Type: MsgStarted, PID: cmd.Process.Pid}); err != nil {
 		// Wire is dead; kill+reap to avoid a zombie, then surface the
@@ -96,24 +119,6 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	}
 
 	return enc.Encode(Message{Type: MsgExit, ExitCode: exitCode})
-}
-
-type processController struct {
-	afterStart func(*exec.Cmd) error
-	close      func()
-}
-
-func (c processController) AfterStart(cmd *exec.Cmd) error {
-	if c.afterStart == nil {
-		return nil
-	}
-	return c.afterStart(cmd)
-}
-
-func (c processController) Close() {
-	if c.close != nil {
-		c.close()
-	}
 }
 
 // pumpStdin drains stdin frames into the child's pipe; returns on
