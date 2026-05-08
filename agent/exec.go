@@ -56,9 +56,14 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	}
 
 	stdinDone := make(chan struct{})
-	go pumpStdin(stdinPipe, stdinFrames, stdinDone)
+	go pumpStdin(ctx, stdinPipe, stdinFrames, stdinDone)
 
 	waitErr := cmd.Wait()
+	// Child is gone; cancel so the stdin pump unblocks even if the
+	// client never sent MsgStdinClose (e.g. interactive TTY caller
+	// whose pumpStdin is wedged on os.Stdin.Read). Without this we'd
+	// hang here and never deliver MsgExit.
+	cancel()
 	<-stdinDone
 
 	// Surface any encoder error in preference to the child's exit —
@@ -80,21 +85,27 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	return sendLocked(enc, encMu, Message{Type: MsgExit, ExitCode: exitCode})
 }
 
-// pumpStdin drains stdin frames into the child's pipe; close on
-// MsgStdinClose, channel close, or write error. Write errors are silent —
-// child closing stdin early is normal (e.g. `head -1`).
-func pumpStdin(w io.WriteCloser, frames <-chan Message, done chan<- struct{}) {
+// pumpStdin drains stdin frames into the child's pipe; returns on
+// MsgStdinClose, channel close, ctx cancel (child exited), or write error.
+// Write errors are silent — child closing stdin early is normal (e.g.
+// `head -1`).
+func pumpStdin(ctx context.Context, w io.WriteCloser, frames <-chan Message, done chan<- struct{}) {
 	defer close(done)
 	defer w.Close() //nolint:errcheck
-	for frame := range frames {
-		if frame.Type == MsgStdinClose {
+	for {
+		select {
+		case <-ctx.Done():
 			return
-		}
-		if frame.Type != MsgStdin || len(frame.Data) == 0 {
-			continue
-		}
-		if _, err := w.Write(frame.Data); err != nil {
-			return
+		case frame, ok := <-frames:
+			if !ok || frame.Type == MsgStdinClose {
+				return
+			}
+			if frame.Type != MsgStdin || len(frame.Data) == 0 {
+				continue
+			}
+			if _, err := w.Write(frame.Data); err != nil {
+				return
+			}
 		}
 	}
 }
