@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -30,6 +31,8 @@ const (
 	// frameMaxBuf caps a single frame so a malformed peer can't OOM us.
 	frameMaxBuf = 8 * 1024 * 1024
 )
+
+var errTerminalFrameSent = errors.New("terminal frame already sent")
 
 // Message is the union of all frames. Only fields relevant to Type are populated.
 type Message struct {
@@ -72,8 +75,9 @@ func (d *Decoder) Decode() (Message, error) {
 // Encoder serializes Encode calls so multiple writers (stdout/stderr pumps,
 // stdin protocol-error path) can share one without an external mutex.
 type Encoder struct {
-	mu sync.Mutex
-	w  io.Writer
+	mu       sync.Mutex
+	w        io.Writer
+	terminal bool
 }
 
 // NewEncoder returns an Encoder writing newline-delimited JSON frames to w.
@@ -90,8 +94,14 @@ func (e *Encoder) Encode(m Message) error {
 	buf = append(buf, '\n')
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.terminal {
+		return errTerminalFrameSent
+	}
 	if _, err := e.w.Write(buf); err != nil {
 		return fmt.Errorf("write frame: %w", err)
+	}
+	if isTerminalFrame(m.Type) {
+		e.terminal = true
 	}
 	return nil
 }
@@ -99,6 +109,10 @@ func (e *Encoder) Encode(m Message) error {
 // SendErrorf encodes a MsgError frame with a formatted message body.
 func (e *Encoder) SendErrorf(format string, args ...any) error {
 	return e.Encode(Message{Type: MsgError, Message: fmt.Sprintf(format, args...)})
+}
+
+func isTerminalFrame(msgType string) bool {
+	return msgType == MsgExit || msgType == MsgError
 }
 
 // framedWriter adapts io.Writer onto framed messages so it can drive

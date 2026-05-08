@@ -1,8 +1,10 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package agent
 
 import "os/exec"
 
-// setProcessGroup is a no-op on non-Linux; production targets Linux guests.
-func setProcessGroup(_ *exec.Cmd) {}
+// setupProcess is a no-op on development platforms that are not guest targets.
+func setupProcess(_ *exec.Cmd) (processController, error) {
+	return processController{}, nil
+}

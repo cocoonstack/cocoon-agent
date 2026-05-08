@@ -96,8 +96,8 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	// Per-session ctx so a stdin protocol error can kill the child
 	// via runExec's CommandContext.
-	execCtx, execCancel := context.WithCancel(ctx)
-	defer execCancel()
+	execCtx, execCancel := context.WithCancelCause(ctx)
+	defer execCancel(nil)
 
 	stdinFrames := make(chan Message, stdinFrameBuffer)
 	stdinDone := make(chan struct{})
@@ -111,7 +111,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 					// Surface protocol corruption as MsgError + kill the
 					// child rather than masquerading as a clean stdin EOF.
 					_ = enc.SendErrorf("stdin: %v", err)
-					execCancel()
+					execCancel(errTerminalFrameSent)
 				}
 				return
 			}

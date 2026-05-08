@@ -23,7 +23,11 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // argv from trusted vsock peer
-	setProcessGroup(cmd)
+	procCtl, err := setupProcess(cmd)
+	if err != nil {
+		return enc.SendErrorf("exec: setup process %s: %v", argv[0], err)
+	}
+	defer procCtl.Close()
 	if len(env) > 0 {
 		cmd.Env = mergeEnv(env)
 	}
@@ -43,6 +47,13 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	if err := cmd.Start(); err != nil {
 		_ = stdinPipe.Close()
 		return enc.SendErrorf("exec: start %s: %v", argv[0], err)
+	}
+	if err := procCtl.AfterStart(cmd); err != nil {
+		cancel()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		_ = stdinPipe.Close()
+		return enc.SendErrorf("exec: setup process %s: %v", argv[0], err)
 	}
 	if err := enc.Encode(Message{Type: MsgStarted, PID: cmd.Process.Pid}); err != nil {
 		// Wire is dead; kill+reap to avoid a zombie, then surface the
@@ -64,6 +75,10 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	cancel()
 	<-stdinDone
 
+	if errors.Is(context.Cause(ctx), errTerminalFrameSent) {
+		return nil
+	}
+
 	// Surface any encoder error in preference to the child's exit —
 	// the client never received MsgExit anyway.
 	if encErr := errors.Join(stdoutW.err(), stderrW.err()); encErr != nil {
@@ -81,6 +96,24 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	}
 
 	return enc.Encode(Message{Type: MsgExit, ExitCode: exitCode})
+}
+
+type processController struct {
+	afterStart func(*exec.Cmd) error
+	close      func()
+}
+
+func (c processController) AfterStart(cmd *exec.Cmd) error {
+	if c.afterStart == nil {
+		return nil
+	}
+	return c.afterStart(cmd)
+}
+
+func (c processController) Close() {
+	if c.close != nil {
+		c.close()
+	}
 }
 
 // pumpStdin drains stdin frames into the child's pipe; returns on

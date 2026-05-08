@@ -92,6 +92,31 @@ func TestDecodeMultipleFrames(t *testing.T) {
 	}
 }
 
+func TestEncodeRejectsFramesAfterTerminal(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+	if err := enc.Encode(Message{Type: MsgError, Message: "boom"}); err != nil {
+		t.Fatalf("encode terminal error: %v", err)
+	}
+	if err := enc.Encode(Message{Type: MsgExit, ExitCode: 1}); !errors.Is(err, errTerminalFrameSent) {
+		t.Fatalf("encode after terminal = %v, want %v", err, errTerminalFrameSent)
+	}
+
+	dec := NewDecoder(&buf)
+	frame, err := dec.Decode()
+	if err != nil {
+		t.Fatalf("decode terminal frame: %v", err)
+	}
+	if frame.Type != MsgError {
+		t.Fatalf("terminal frame type = %q, want %q", frame.Type, MsgError)
+	}
+	if _, err := dec.Decode(); !errors.Is(err, io.EOF) {
+		t.Fatalf("expected EOF after single terminal frame, got %v", err)
+	}
+}
+
 func TestDecodeRejectsMalformedJSON(t *testing.T) {
 	t.Parallel()
 

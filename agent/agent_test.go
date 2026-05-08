@@ -3,6 +3,7 @@ package agent_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -124,9 +125,9 @@ func TestServerNonexistentCommand(t *testing.T) {
 	}
 }
 
-// TestServerRejectsMalformedStdinFrame guards against the silent-EOF
-// regression: a malformed mid-stream frame must surface as MsgError, not
-// be papered over as a clean child stdin EOF.
+// TestServerRejectsMalformedStdinFrame guards against the silent-EOF and
+// double-terminal regressions: a malformed mid-stream frame must surface as
+// MsgError and must not be followed by MsgExit.
 func TestServerRejectsMalformedStdinFrame(t *testing.T) {
 	t.Parallel()
 	_, conn := dialTestServer(t)
@@ -153,6 +154,16 @@ func TestServerRejectsMalformedStdinFrame(t *testing.T) {
 	}
 	if !sawError {
 		t.Fatal("expected MsgError after malformed stdin frame")
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	frame, err := dec.Decode()
+	if err == nil {
+		t.Fatalf("expected connection close after MsgError, got frame %#v", frame)
+	}
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("expected EOF after MsgError, got %v", err)
 	}
 }
 
