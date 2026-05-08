@@ -55,22 +55,36 @@ Copy-Item -Path $BinarySource -Destination $BinaryDest -Force
 
 # 3. create or update the service.
 #
-# sc.exe demands "key= value" with a literal space after `=`, but PowerShell's
-# native invocation splits "binPath=" into one arg and "$binPath" into another,
-# producing 1639 INVALID_COMMAND_LINE. Routing through cmd.exe preserves the
-# literal "key= value" tokens. cmd.exe is unconditionally available on every
-# supported Windows SKU, so this is portable.
+# Stage the sc.exe call in a temp .bat. cmd.exe parses the file's literal
+# `key= "\"path\"..."` exactly the way sc.exe needs (the quoted-with-
+# embedded-quotes binPath survives as a single arg). Calling sc.exe via
+# PowerShell directly mangles the `key= value` token; calling cmd.exe /c
+# with the same string also mangles it because cmd's command-line quote
+# stripping rules differ between argv and "/c <string>". A .bat file is
+# the boring path that all three of those parsers handle the same way.
 $binPath = "`"$BinaryDest`" serve --port $Port"
+function Invoke-Bat {
+    param([string]$Body)
+    $bat = Join-Path $env:TEMP ("cocoon-svc-{0:N}.bat" -f [guid]::NewGuid())
+    Set-Content -Path $bat -Value "@echo off`r`n$Body" -Encoding ASCII -Force
+    try {
+        & cmd.exe /c $bat | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "sc.exe call failed (rc=$LASTEXITCODE) for: $Body" }
+    } finally {
+        Remove-Item -LiteralPath $bat -Force -ErrorAction SilentlyContinue
+    }
+}
+
 if ($existing) {
     Write-Step "updating service $ServiceName binPath"
-    & cmd.exe /c "sc.exe config $ServiceName binPath= `"$binPath`" start= auto" | Out-Null
+    Invoke-Bat ('sc.exe config {0} binPath= "\"{1}\" serve --port {2}" start= auto' -f $ServiceName, $BinaryDest, $Port)
 } else {
     Write-Step "creating service $ServiceName"
-    & cmd.exe /c "sc.exe create $ServiceName binPath= `"$binPath`" start= auto DisplayName= `"$DisplayName`"" | Out-Null
-    & cmd.exe /c "sc.exe description $ServiceName `"$Description`"" | Out-Null
+    Invoke-Bat ('sc.exe create {0} binPath= "\"{1}\" serve --port {2}" start= auto DisplayName= "{3}"' -f $ServiceName, $BinaryDest, $Port, $DisplayName)
+    Invoke-Bat ('sc.exe description {0} "{1}"' -f $ServiceName, $Description)
     # 24h reset window mirrors Linux's Restart=always intent — a flapping
     # bug self-heals instead of permanently bricking the agent.
-    & cmd.exe /c "sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000/restart/5000" | Out-Null
+    Invoke-Bat ('sc.exe failure {0} reset= 86400 actions= restart/5000/restart/5000/restart/5000' -f $ServiceName)
 }
 
 # Confirm registration before attempting Start-Service; otherwise an SCM hiccup
