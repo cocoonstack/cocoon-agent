@@ -75,12 +75,19 @@ function Invoke-Bat {
     }
 }
 
+# delayed-auto vs auto: SCM races the viosock PnP bind on plain `auto`.
+# At first boot we measured the agent process exit with errno 1 because
+# listenVsock() hits the viosock WSP before it's wired up; SCM's three
+# 5-second restart windows are all spent inside that race so the service
+# stays Stopped after boot. delayed-auto starts the service ~2 minutes
+# in, well past viosock readiness — observed deterministic Running on
+# every cold boot of the GHCR-published image after this change.
 if ($existing) {
     Write-Step "updating service $ServiceName binPath"
-    Invoke-Bat ('sc.exe config {0} binPath= "\"{1}\" serve --port {2}" start= auto' -f $ServiceName, $BinaryDest, $Port)
+    Invoke-Bat ('sc.exe config {0} binPath= "\"{1}\" serve --port {2}" start= delayed-auto' -f $ServiceName, $BinaryDest, $Port)
 } else {
     Write-Step "creating service $ServiceName"
-    Invoke-Bat ('sc.exe create {0} binPath= "\"{1}\" serve --port {2}" start= auto DisplayName= "{3}"' -f $ServiceName, $BinaryDest, $Port, $DisplayName)
+    Invoke-Bat ('sc.exe create {0} binPath= "\"{1}\" serve --port {2}" start= delayed-auto DisplayName= "{3}"' -f $ServiceName, $BinaryDest, $Port, $DisplayName)
     Invoke-Bat ('sc.exe description {0} "{1}"' -f $ServiceName, $Description)
     # 24h reset window mirrors Linux's Restart=always intent — a flapping
     # bug self-heals instead of permanently bricking the agent.
@@ -96,8 +103,8 @@ if ($null -eq $svc) {
 
 # 4. start. Tolerate Start-Service failure when the viosock device is absent —
 # image-build VMs typically have no vsock device, so the agent can't listen yet.
-# The service is registered with start=auto, so production CH (which exposes
-# the vsock device) will start it automatically on boot.
+# The service is registered delayed-auto, so production CH (which exposes the
+# vsock device) starts it ~2 min after boot.
 Write-Step "starting $ServiceName"
 try {
     Start-Service -Name $ServiceName -ErrorAction Stop
