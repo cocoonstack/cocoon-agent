@@ -2,6 +2,7 @@ bin/*
 cocoon-agent
 cocoon-agent-linux-*
 cocoon-agent-darwin-*
+cocoon-agent-windows-*
 coverage.out
 coverage.html
 coverage.txt
