@@ -18,7 +18,6 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 	"unsafe"
 
@@ -39,18 +38,27 @@ const (
 )
 
 var (
-	modws2_32           = windows.NewLazySystemDLL("ws2_32.dll")
-	procBind            = modws2_32.NewProc("bind")
-	procListen          = modws2_32.NewProc("listen")
-	procAccept          = modws2_32.NewProc("accept")
-	procConnect         = modws2_32.NewProc("connect")
-	procRecv            = modws2_32.NewProc("recv")
-	procSend            = modws2_32.NewProc("send")
-	procWSAStartup      = modws2_32.NewProc("WSAStartup")
-	procWSAGetLastError = modws2_32.NewProc("WSAGetLastError")
+	modws2_32      = windows.NewLazySystemDLL("ws2_32.dll")
+	procBind       = modws2_32.NewProc("bind")
+	procListen     = modws2_32.NewProc("listen")
+	procAccept     = modws2_32.NewProc("accept")
+	procConnect    = modws2_32.NewProc("connect")
+	procRecv       = modws2_32.NewProc("recv")
+	procSend       = modws2_32.NewProc("send")
+	procWSAStartup = modws2_32.NewProc("WSAStartup")
 
-	wsaInitOnce sync.Once
-	wsaInitErr  error
+	// LazyProc.Call returns GetLastError as its third value, captured by
+	// the Go runtime on the same OS thread before the goroutine can be
+	// rescheduled — so we never need a separate WSAGetLastError dance.
+	wsaInit = sync.OnceValue(func() error {
+		var d windows.WSAData
+		// 0x0202 = MAKEWORD(2,2); WSAStartup returns 0 on success.
+		ret, _, _ := procWSAStartup.Call(0x0202, uintptr(unsafe.Pointer(&d))) //nolint:gosec // WSAStartup output param requires unsafe.Pointer
+		if ret != 0 {
+			return fmt.Errorf("wsastartup: %d", ret)
+		}
+		return nil
+	})
 
 	errDeadlineUnsupported = errors.New("vsock: deadline unsupported on windows")
 
@@ -70,32 +78,6 @@ type sockaddrVM struct {
 	_         [3]uint8
 }
 
-// wsaLastError returns the per-thread Winsock error as a syscall.Errno;
-// x/sys/windows v0.15 doesn't export WSAGetLastError, hence the LazyProc.
-// Always returns non-nil: callers invoke this only after a SOCKET_ERROR
-// return, so a 0 from WSAGetLastError means the thread state was clobbered
-// (e.g. a concurrent winsock call) — surface that explicitly instead of
-// wrapping nil through %w.
-func wsaLastError() error {
-	r, _, _ := procWSAGetLastError.Call()
-	if r == 0 {
-		return errors.New("winsock: unknown error (WSAGetLastError returned 0)")
-	}
-	return syscall.Errno(r)
-}
-
-func wsaInit() error {
-	wsaInitOnce.Do(func() {
-		var d windows.WSAData
-		// 0x0202 = MAKEWORD(2,2); ws2_32.WSAStartup returns 0 on success.
-		ret, _, _ := procWSAStartup.Call(0x0202, uintptr(unsafe.Pointer(&d))) //nolint:gosec // WSAStartup output param requires unsafe.Pointer
-		if ret != 0 {
-			wsaInitErr = fmt.Errorf("wsastartup: %d", ret)
-		}
-	})
-	return wsaInitErr
-}
-
 func listenVsock(port uint32) (net.Listener, error) {
 	if err := wsaInit(); err != nil {
 		return nil, err
@@ -105,15 +87,15 @@ func listenVsock(port uint32) (net.Listener, error) {
 		return nil, fmt.Errorf("vsock socket: %w", err)
 	}
 	sa := sockaddrVM{Family: afVsock, Port: port, CID: vmAddrCidAny}
-	r, _, _ := procBind.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock bind requires raw pointer
+	r, _, callErr := procBind.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock bind requires raw pointer
 	if r == socketError {
 		_ = windows.Closesocket(h)
-		return nil, fmt.Errorf("vsock bind port=%d: %w", port, wsaLastError())
+		return nil, fmt.Errorf("vsock bind port=%d: %w", port, callErr)
 	}
-	r, _, _ = procListen.Call(uintptr(h), 32)
+	r, _, callErr = procListen.Call(uintptr(h), 32)
 	if r == socketError {
 		_ = windows.Closesocket(h)
-		return nil, fmt.Errorf("vsock listen: %w", wsaLastError())
+		return nil, fmt.Errorf("vsock listen: %w", callErr)
 	}
 	return &vsockListener{h: h, port: port}, nil
 }
@@ -127,10 +109,10 @@ func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
 		return nil, fmt.Errorf("vsock socket: %w", err)
 	}
 	sa := sockaddrVM{Family: afVsock, Port: port, CID: cid}
-	r, _, _ := procConnect.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock connect requires raw pointer
+	r, _, callErr := procConnect.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock connect requires raw pointer
 	if r == socketError {
 		_ = windows.Closesocket(h)
-		return nil, fmt.Errorf("vsock connect %d:%d: %w", cid, port, wsaLastError())
+		return nil, fmt.Errorf("vsock connect %d:%d: %w", cid, port, callErr)
 	}
 	return &vsockConn{
 		h:        h,
@@ -151,12 +133,12 @@ func (l *vsockListener) Accept() (net.Conn, error) {
 	for {
 		var sa sockaddrVM
 		salen := sockaddrVMSize
-		r, _, _ := procAccept.Call(uintptr(l.h), uintptr(unsafe.Pointer(&sa)), uintptr(unsafe.Pointer(&salen))) //nolint:gosec // winsock accept requires raw pointers
+		r, _, callErr := procAccept.Call(uintptr(l.h), uintptr(unsafe.Pointer(&sa)), uintptr(unsafe.Pointer(&salen))) //nolint:gosec // winsock accept requires raw pointers
 		if r == socketError {
 			if l.closed.Load() {
 				return nil, net.ErrClosed
 			}
-			return nil, fmt.Errorf("vsock accept: %w", wsaLastError())
+			return nil, fmt.Errorf("vsock accept: %w", callErr)
 		}
 		conn := &vsockConn{
 			h:         windows.Handle(r),
@@ -195,12 +177,12 @@ func (c *vsockConn) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	r, _, _ := procRecv.Call(uintptr(c.h), uintptr(unsafe.Pointer(&p[0])), uintptr(len(p)), 0) //nolint:gosec // winsock recv requires raw buffer pointer
+	r, _, callErr := procRecv.Call(uintptr(c.h), uintptr(unsafe.Pointer(&p[0])), uintptr(len(p)), 0) //nolint:gosec // winsock recv requires raw buffer pointer
 	if r == socketError {
 		if c.closed.Load() {
 			return 0, net.ErrClosed
 		}
-		return 0, fmt.Errorf("vsock recv: %w", wsaLastError())
+		return 0, fmt.Errorf("vsock recv: %w", callErr)
 	}
 	if r == 0 {
 		return 0, io.EOF
@@ -214,12 +196,12 @@ func (c *vsockConn) Write(p []byte) (int, error) {
 	}
 	total := 0
 	for total < len(p) {
-		r, _, _ := procSend.Call(uintptr(c.h), uintptr(unsafe.Pointer(&p[total])), uintptr(len(p)-total), 0) //nolint:gosec // winsock send requires raw buffer pointer
+		r, _, callErr := procSend.Call(uintptr(c.h), uintptr(unsafe.Pointer(&p[total])), uintptr(len(p)-total), 0) //nolint:gosec // winsock send requires raw buffer pointer
 		if r == socketError {
 			if c.closed.Load() {
 				return total, net.ErrClosed
 			}
-			return total, fmt.Errorf("vsock send: %w", wsaLastError())
+			return total, fmt.Errorf("vsock send: %w", callErr)
 		}
 		if r == 0 {
 			// Guard against the undocumented send() == 0 case so we don't spin.

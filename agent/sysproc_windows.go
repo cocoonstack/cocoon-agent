@@ -17,8 +17,9 @@ import (
 const maxWindowsProcessID = int64(^uint32(0))
 
 // windowsProcessController owns the Job Object that backs one runExec
-// session. cmd.Cancel and processController.close both fire close() —
-// dual-wired so AfterStart-failure paths (no Cancel) still release the job.
+// session. cmd.Cancel and processController.close both fire close():
+// Cancel covers ctx-cancel during cmd.Wait, Close (via runExec's defer)
+// covers the paths Cancel never reaches — normal exit, cmd.Start failure.
 type windowsProcessController struct {
 	job  windows.Handle
 	once sync.Once

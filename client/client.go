@@ -50,7 +50,6 @@ func Run(ctx context.Context, conn io.ReadWriteCloser, argv []string, env map[st
 
 	var stdinReadErr atomic.Pointer[error]
 	if stdin != nil {
-		// enc is single-writer post-handshake; no mutex needed.
 		go pumpStdin(stdin, enc, &stdinReadErr, runCancel)
 	} else {
 		_ = enc.Encode(agent.Message{Type: agent.MsgStdinClose})
