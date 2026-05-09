@@ -92,9 +92,8 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	go pumpStdin(ctx, stdinPipe, stdinFrames, stdinDone)
 
 	waitErr := cmd.Wait()
-	// Child is gone; cancel so the stdin pump unblocks even if the client
-	// never sent MsgStdinClose (e.g. interactive TTY caller whose pumpStdin
-	// is wedged on os.Stdin.Read). Without this we'd hang here forever.
+	// Cancel so the stdin pump unblocks if the client never sent
+	// MsgStdinClose — otherwise <-stdinDone hangs forever.
 	cancel()
 	<-stdinDone
 

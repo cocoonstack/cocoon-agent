@@ -63,8 +63,7 @@ func (s *Server) Serve(ctx context.Context) error {
 }
 
 // Close stops the accept loop and tears down every in-flight session,
-// matching the ctx-cancel shutdown path so Close-as-shutdown can't hang
-// on slow peers.
+// mirroring ctx-cancel so it can't hang on slow peers.
 func (s *Server) Close() error {
 	err := s.listener.Close()
 	s.closeAllConns()

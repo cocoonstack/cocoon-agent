@@ -115,9 +115,8 @@ func isTerminalFrame(msgType string) bool {
 	return msgType == MsgExit || msgType == MsgError
 }
 
-// framedWriter adapts io.Writer onto framed messages so it can drive
-// exec.Cmd.Stdout/Stderr. First encode failure is captured and fires
-// cancel so the runner can kill the child.
+// framedWriter adapts io.Writer onto framed messages for exec.Cmd's
+// stdout/stderr; the first encode failure fires cancel to kill the child.
 type framedWriter struct {
 	msgType string
 	enc     *Encoder
