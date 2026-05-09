@@ -15,7 +15,7 @@ vsock is host↔guest only, has no IP layer, and the kernel `vhost_vsock` module
 
 ## Status
 
-v0.1 — first working version. See [Roadmap](#roadmap) for what's coming.
+v0.1.x — Linux + Windows guests supported. PTY mode planned; see [Roadmap](#roadmap).
 
 ## Architecture
 
@@ -87,10 +87,10 @@ output captured. In practice:
 - ⚠️ `powershell.exe -Command "<X>"` may produce partial output for cmdlets
   that render directly to the console.
 - ❌ TUI programs (`vim`, `far`, `htop`-style) and the interactive
-  `powershell.exe` REPL prompt are not visible — wait for v0.3 PTY mode.
+  `powershell.exe` REPL prompt are not visible — wait for the planned PTY mode.
 
 Pipe mode is sufficient for automation and scripted tasks; interactive
-shells need v0.3.
+shells need PTY mode.
 
 ## Smoke test from the host
 
@@ -119,12 +119,12 @@ CLI flags:
 
 ## Roadmap
 
-| Version | Scope |
-|---|---|
-| v0.1 | exec, stdin streaming, stdout/stderr, exit code; vsock listener; cobra CLI (linux only) |
-| v0.2 (current) | Windows guest support (AF_VSOCK via viosock); PowerShell service installer |
-| v0.3 | PTY mode (`tty: true`), window resize messages, signal forwarding |
-| v0.4 | Streaming `cocoon vm exec` host-side adapter (subprocess-friendly for vk-cocoon `RunInContainer`) |
+| Milestone | Status | Scope |
+|---|---|---|
+| MVP | v0.1.0 | exec, stdin streaming, stdout/stderr, exit code; vsock listener; cobra CLI (Linux) |
+| Windows guests | v0.1.1+ (current) | AF_VSOCK via viosock; SCM-registered Windows service; PowerShell installer |
+| PTY mode | planned | `tty: true`, window resize, signal forwarding — interactive shells, `vim`/`top` |
+| Streaming host adapter | planned | subprocess-friendly hand-off into vk-cocoon `RunInContainer` |
 
 ## Related
 
