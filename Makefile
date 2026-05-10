@@ -5,7 +5,7 @@ BINARY_NAME := cocoon-agent
 GOIMPORTS_LOCAL_PREFIXES := github.com/cocoonstack/
 REVISION := $(shell git rev-parse HEAD || echo unknown)
 BUILTAT := $(shell date +%Y-%m-%dT%H:%M:%S)
-VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
+VERSION := $(shell git tag --sort=-version:refname --merged HEAD | head -1 2>/dev/null || echo dev)
 GO_LDFLAGS ?= -X $(REPO_PATH)/version.REVISION=$(REVISION) \
               -X $(REPO_PATH)/version.BUILTAT=$(BUILTAT) \
               -X $(REPO_PATH)/version.VERSION=$(VERSION)
