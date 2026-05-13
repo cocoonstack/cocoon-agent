@@ -3,21 +3,27 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 
 	"github.com/mdlayher/vsock"
+	"github.com/projecteru2/core/log"
 )
 
 var _ net.Listener = (*hostOnlyListener)(nil)
 
-func listenVsock(port uint32) (net.Listener, error) {
+func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
 	l, err := vsock.Listen(port, nil)
 	if err != nil {
 		return nil, fmt.Errorf("vsock listen: %w", err)
 	}
-	return &hostOnlyListener{Listener: l}, nil
+	return &hostOnlyListener{
+		Listener: l,
+		ctx:      ctx,
+		logger:   log.WithFunc("cmd.hostOnlyListener.Accept"),
+	}, nil
 }
 
 func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
@@ -34,6 +40,10 @@ func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
 // and trigger root-level command execution.
 type hostOnlyListener struct {
 	net.Listener
+	// ctx is the agent's serve ctx — listener outlives any per-call ctx, so
+	// it's plumbed through at construction for Accept-loop diagnostic logging.
+	ctx    context.Context
+	logger *log.Fields
 }
 
 func (l *hostOnlyListener) Accept() (net.Conn, error) {
@@ -45,6 +55,7 @@ func (l *hostOnlyListener) Accept() (net.Conn, error) {
 		if isHostPeer(conn) {
 			return conn, nil
 		}
+		l.logger.Warnf(l.ctx, "rejecting non-host vsock peer %s", conn.RemoteAddr())
 		_ = conn.Close()
 	}
 }

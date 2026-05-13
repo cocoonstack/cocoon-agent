@@ -44,7 +44,7 @@ func listenVsockWithRetry(ctx context.Context, port uint32) (net.Listener, error
 	logger := log.WithFunc("cmd.serve.listenRetry")
 	deadline := time.Now().Add(listenRetryTimeout)
 	for attempt := 1; ; attempt++ {
-		lsn, err := listenVsock(port)
+		lsn, err := listenVsock(ctx, port)
 		if err == nil {
 			if attempt > 1 {
 				logger.Infof(ctx, "vsock listen succeeded on attempt %d", attempt)
