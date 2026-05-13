@@ -3,6 +3,7 @@
 package cmd
 
 import (
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -16,8 +17,8 @@ type staticAddrConn struct {
 	addr net.Addr
 }
 
-func (c *staticAddrConn) Read(_ []byte) (int, error)         { return 0, nil }
-func (c *staticAddrConn) Write(_ []byte) (int, error)        { return 0, nil }
+func (c *staticAddrConn) Read(_ []byte) (int, error)         { return 0, io.EOF }
+func (c *staticAddrConn) Write(p []byte) (int, error)        { return len(p), nil }
 func (c *staticAddrConn) Close() error                       { return nil }
 func (c *staticAddrConn) LocalAddr() net.Addr                { return c.addr }
 func (c *staticAddrConn) RemoteAddr() net.Addr               { return c.addr }
