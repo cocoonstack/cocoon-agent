@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,11 @@ import (
 
 	"github.com/cocoonstack/cocoon-agent/agent"
 	"github.com/cocoonstack/cocoon-agent/client"
+)
+
+const (
+	initialGoroutineDumpSize = 1 << 16
+	maxGoroutineDumpSize     = 1 << 24
 )
 
 // dialTestServer runs the agent over loopback TCP and dials a client conn.
@@ -290,14 +296,30 @@ func (l *errorAcceptListener) Addr() net.Addr {
 	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}
 }
 
+func goroutineDump() string {
+	size := 1 << 16
+	for {
+		buf := make([]byte, size)
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			return string(buf[:n])
+		}
+		size *= 2
+	}
+}
+
+func countServeWatcherGoroutines() int {
+	return strings.Count(goroutineDump(), "(*Server).Serve.func1")
+}
+
 // TestServerWatcherExitsOnPermanentAcceptError: on a non-ErrClosed Accept
 // failure, Serve must reap the ctx watcher via the done channel rather than
 // leak it until the (possibly never-canceled) parent ctx fires.
 //
-// Not parallel: relies on a runtime.NumGoroutine baseline, which sibling
-// parallel tests would perturb.
+// Not parallel: asserts against the specific Serve watcher goroutine and keeps
+// other tests from creating extra matching stacks while it samples.
 func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
-	before := runtime.NumGoroutine()
+	before := countServeWatcherGoroutines()
 
 	srv := agent.NewServer(&errorAcceptListener{err: errors.New("synthetic permanent accept failure")})
 	// Long-lived ctx so only the done-channel path can release the watcher.
@@ -316,14 +338,16 @@ func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 		t.Fatal("Serve did not return after permanent accept error")
 	}
 
-	// Watcher exits async after close(done); poll until back to baseline.
+	// Watcher exits async after close(done); poll until the specific watcher
+	// stack count returns to baseline.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if runtime.NumGoroutine() <= before {
+		runtime.GC()
+		debug.FreeOSMemory()
+		if countServeWatcherGoroutines() == before {
 			return
 		}
-		runtime.Gosched()
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Errorf("goroutine leak suspected: before=%d after=%d", before, runtime.NumGoroutine())
+	t.Fatalf("Serve watcher goroutine still present:\n%s", goroutineDump())
 }
