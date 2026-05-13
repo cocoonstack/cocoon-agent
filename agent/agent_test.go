@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
@@ -297,15 +296,14 @@ func (l *errorAcceptListener) Addr() net.Addr {
 }
 
 func goroutineDump() string {
-	size := 1 << 16
-	const maxSize = 1 << 24
+	size := initialGoroutineDumpSize
 	for {
 		buf := make([]byte, size)
 		n := runtime.Stack(buf, true)
-		if n < len(buf) || size == maxSize {
+		if n < len(buf) || size == maxGoroutineDumpSize {
 			return string(buf[:n])
 		}
-		size = min(size*2, maxSize)
+		size = min(size*2, maxGoroutineDumpSize)
 	}
 }
 
@@ -343,11 +341,10 @@ func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 	// stack count returns to baseline.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		runtime.GC()
-		debug.FreeOSMemory()
 		if countServeWatcherGoroutines() <= before {
 			return
 		}
+		runtime.Gosched()
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("Serve watcher goroutine still present:\n%s", goroutineDump())
