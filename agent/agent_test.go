@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -252,4 +253,74 @@ func TestServerMergesEnvCallerWins(t *testing.T) {
 	if got := stdout.String(); got != "caller-value" {
 		t.Errorf("caller env did not win on collision: got %q, want %q", got, "caller-value")
 	}
+}
+
+// errorAcceptListener satisfies net.Listener but synthesizes a permanent
+// non-net.ErrClosed Accept failure on demand. Used to exercise Serve's
+// permanent-error return path so we can prove the ctx watcher goroutine
+// gets reaped instead of leaking until ctx eventually cancels.
+type errorAcceptListener struct {
+	err     error
+	addr    net.Addr
+	closeMu sync.Mutex
+	closed  bool
+}
+
+func (l *errorAcceptListener) Accept() (net.Conn, error) {
+	return nil, l.err
+}
+
+func (l *errorAcceptListener) Close() error {
+	l.closeMu.Lock()
+	defer l.closeMu.Unlock()
+	l.closed = true
+	return nil
+}
+
+func (l *errorAcceptListener) Addr() net.Addr {
+	if l.addr != nil {
+		return l.addr
+	}
+	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}
+}
+
+// TestServerWatcherExitsOnPermanentAcceptError guards against the watcher-
+// goroutine leak: when Accept fails with a non-net.ErrClosed permanent error
+// (e.g. EMFILE, syscall failure), Serve returns — and the <-ctx.Done watcher
+// must exit too. Without the done-channel reap path, the watcher persists
+// until the (potentially never-canceled) parent ctx fires.
+func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
+	t.Parallel()
+	before := runtime.NumGoroutine()
+
+	srv := agent.NewServer(&errorAcceptListener{err: errors.New("synthetic permanent accept failure")})
+	// Use a long-lived ctx so the watcher couldn't exit via ctx.Done — only
+	// the done-channel reap path can release it.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(ctx) }()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected permanent accept error to surface")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return after permanent accept error")
+	}
+
+	// Watcher exits asynchronously after the done-channel close; give the
+	// runtime a moment to reschedule then assert the goroutine count is
+	// back to baseline (allowing slack for testing-framework goroutines).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if runtime.NumGoroutine() <= before {
+			return
+		}
+		runtime.Gosched()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("goroutine leak suspected: before=%d after=%d", before, runtime.NumGoroutine())
 }

@@ -41,10 +41,18 @@ func (s *Server) Serve(ctx context.Context) error {
 	logger := log.WithFunc("agent.Server.Serve")
 	logger.Infof(ctx, "agent listening on %s", s.listener.Addr())
 
+	// Reap the ctx watcher on every Serve return path — including the
+	// permanent-Accept-error case — otherwise the goroutine leaks until
+	// the caller (which may never) cancels ctx.
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		<-ctx.Done()
-		_ = s.listener.Close()
-		s.closeAllConns()
+		select {
+		case <-ctx.Done():
+			_ = s.listener.Close()
+			s.closeAllConns()
+		case <-done:
+		}
 	}()
 
 	var connWG sync.WaitGroup
@@ -56,6 +64,7 @@ func (s *Server) Serve(ctx context.Context) error {
 				return nil
 			}
 			logger.Error(ctx, err, "accept")
+			connWG.Wait()
 			return fmt.Errorf("accept: %w", err)
 		}
 		connWG.Go(func() { s.handleConn(ctx, conn) })
