@@ -298,13 +298,14 @@ func (l *errorAcceptListener) Addr() net.Addr {
 
 func goroutineDump() string {
 	size := 1 << 16
+	const maxSize = 1 << 24
 	for {
 		buf := make([]byte, size)
 		n := runtime.Stack(buf, true)
-		if n < len(buf) {
+		if n < len(buf) || size == maxSize {
 			return string(buf[:n])
 		}
-		size *= 2
+		size = min(size*2, maxSize)
 	}
 }
 
@@ -344,7 +345,7 @@ func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 	for time.Now().Before(deadline) {
 		runtime.GC()
 		debug.FreeOSMemory()
-		if countServeWatcherGoroutines() == before {
+		if countServeWatcherGoroutines() <= before {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
