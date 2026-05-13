@@ -26,7 +26,7 @@ func dialTestServer(t *testing.T) (context.Context, net.Conn) {
 		t.Fatalf("listen tcp: %v", err)
 	}
 	srv := agent.NewServer(tcp)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	var wg sync.WaitGroup
 	wg.Go(func() { _ = srv.Serve(ctx) })
 	conn, err := net.Dial("tcp", tcp.Addr().String())
@@ -92,6 +92,34 @@ func TestServerStreamsStdin(t *testing.T) {
 	}
 	if got := strings.TrimSpace(stdout.String()); got != "hello-stdin" {
 		t.Errorf("stdout = %q, want \"hello-stdin\"", got)
+	}
+}
+
+// TestServerMsgStdinCloseTerminatesChildStdin exercises the MsgStdinClose
+// mid-stream path: the child must observe EOF on stdin after the close frame
+// and exit 0. `wc -c` produces a deterministic byte count, so we can also
+// confirm the pre-close payload reached the child intact.
+func TestServerMsgStdinCloseTerminatesChildStdin(t *testing.T) {
+	t.Parallel()
+	ctx, conn := dialTestServer(t)
+
+	payload := "abcde"
+	var stdout bytes.Buffer
+	exit, err := client.Run(
+		ctx, conn,
+		[]string{"sh", "-c", "wc -c"},
+		nil,
+		strings.NewReader(payload),
+		&stdout, io.Discard,
+	)
+	if err != nil {
+		t.Fatalf("client run: %v", err)
+	}
+	if exit != 0 {
+		t.Errorf("exit = %d, want 0", exit)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "5" {
+		t.Errorf("wc -c stdout = %q, want \"5\"", got)
 	}
 }
 
