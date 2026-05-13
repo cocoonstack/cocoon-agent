@@ -293,8 +293,10 @@ func (l *errorAcceptListener) Addr() net.Addr {
 // TestServerWatcherExitsOnPermanentAcceptError: on a non-ErrClosed Accept
 // failure, Serve must reap the ctx watcher via the done channel rather than
 // leak it until the (possibly never-canceled) parent ctx fires.
+//
+// Not parallel: relies on a runtime.NumGoroutine baseline, which sibling
+// parallel tests would perturb.
 func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
-	t.Parallel()
 	before := runtime.NumGoroutine()
 
 	srv := agent.NewServer(&errorAcceptListener{err: errors.New("synthetic permanent accept failure")})
