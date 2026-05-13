@@ -3,15 +3,23 @@ Description=Cocoon agent (vsock command exec)
 Documentation=https://github.com/cocoonstack/cocoon-agent
 # vsock is host-local; no network or DNS dependency.
 
+# Crash-loop bound: at most 5 restarts inside 60s before systemd holds the
+# unit in failed state. Prevents a wedged hypervisor/viosock state from
+# pegging journald with restart churn. StartLimit* live under [Unit] since
+# systemd v229 — the [Service]-side spelling is the legacy form.
+StartLimitBurst=5
+StartLimitIntervalSec=60s
+
 [Service]
 Type=simple
 User=root
 Group=root
-# Best-effort load of vsock transport. Most distro kernels build it in
-# or auto-load on virtio-vsock device probe; the leading dash keeps the
-# unit alive on minimal kernels that ship without the module entirely
-# (e.g. ubuntu linux-image-virtual in cocoon's OCI guest images).
-ExecStartPre=-/sbin/modprobe vhost_vsock
+# No modprobe ExecStartPre: vhost_vsock is the HOST-side module (driver for
+# /dev/vhost-vsock that the hypervisor opens) — loading it inside the GUEST
+# is a no-op error. The guest needs virtio_transport_common +
+# vmw_vsock_virtio_transport, both of which auto-load on virtio-vsock device
+# probe in any modern distro kernel. listenVsockWithRetry already rides out
+# the bind window if the device shows up late.
 ExecStart=/usr/local/bin/cocoon-agent serve
 Environment=AGENT_LOG_LEVEL=info
 Restart=always
