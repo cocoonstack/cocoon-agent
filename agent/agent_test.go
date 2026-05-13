@@ -288,27 +288,15 @@ func TestServerMergesEnvCallerWins(t *testing.T) {
 // permanent-error return path so we can prove the ctx watcher goroutine
 // gets reaped instead of leaking until ctx eventually cancels.
 type errorAcceptListener struct {
-	err     error
-	addr    net.Addr
-	closeMu sync.Mutex
-	closed  bool
+	err error
 }
 
 func (l *errorAcceptListener) Accept() (net.Conn, error) {
 	return nil, l.err
 }
 
-func (l *errorAcceptListener) Close() error {
-	l.closeMu.Lock()
-	defer l.closeMu.Unlock()
-	l.closed = true
-	return nil
-}
-
+func (l *errorAcceptListener) Close() error { return nil }
 func (l *errorAcceptListener) Addr() net.Addr {
-	if l.addr != nil {
-		return l.addr
-	}
 	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}
 }
 
