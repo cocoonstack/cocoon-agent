@@ -224,3 +224,32 @@ func TestServerMergesEnvWithHost(t *testing.T) {
 		t.Errorf("host PATH not preserved on merge: %q", out)
 	}
 }
+
+// TestServerMergesEnvCallerWins guards against the merge-order regression: a
+// caller-supplied value for a key that also exists in the host env must reach
+// the child, not be shadowed by the host's value. The historical bug was an
+// append-host-then-append-caller layout — under libc getenv (which returns the
+// FIRST matching entry), the host value survives.
+//
+// Cannot run with t.Parallel: t.Setenv mutates process-global os.Environ.
+func TestServerMergesEnvCallerWins(t *testing.T) {
+	t.Setenv("COCOON_AGENT_OVERRIDE_VAR", "host-value")
+	ctx, conn := dialTestServer(t)
+
+	var stdout bytes.Buffer
+	exit, err := client.Run(
+		ctx, conn,
+		[]string{"sh", "-c", "printf %s \"$COCOON_AGENT_OVERRIDE_VAR\""},
+		map[string]string{"COCOON_AGENT_OVERRIDE_VAR": "caller-value"},
+		nil, &stdout, io.Discard,
+	)
+	if err != nil {
+		t.Fatalf("client run: %v", err)
+	}
+	if exit != 0 {
+		t.Errorf("exit = %d, want 0", exit)
+	}
+	if got := stdout.String(); got != "caller-value" {
+		t.Errorf("caller env did not win on collision: got %q, want %q", got, "caller-value")
+	}
+}

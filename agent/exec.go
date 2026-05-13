@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // processController hooks platform-specific child-lifecycle steps into
@@ -145,11 +147,20 @@ func pumpStdin(ctx context.Context, w io.WriteCloser, frames <-chan Message, don
 }
 
 // mergeEnv layers caller env over os.Environ; caller keys win on collision.
-func mergeEnv(env map[string]string) []string {
-	hostEnv := os.Environ()
-	out := make([]string, 0, len(hostEnv)+len(env))
-	out = append(out, hostEnv...)
-	for k, v := range env {
+// Deduping via map matters because libc's getenv returns the FIRST match for
+// duplicate keys in envp — naive append(host, caller...) would leak the host
+// value through and silently lose caller overrides for PATH, HOME, etc.
+func mergeEnv(callerEnv map[string]string) []string {
+	host := os.Environ()
+	merged := make(map[string]string, len(host)+len(callerEnv))
+	for _, kv := range host {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			merged[k] = v
+		}
+	}
+	maps.Copy(merged, callerEnv)
+	out := make([]string, 0, len(merged))
+	for k, v := range merged {
 		out = append(out, k+"="+v)
 	}
 	return out
