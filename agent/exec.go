@@ -152,9 +152,14 @@ func mergeEnv(callerEnv map[string]string) []string {
 	host := os.Environ()
 	merged := make(map[string]string, len(host)+len(callerEnv))
 	for _, kv := range host {
-		if k, v, ok := strings.Cut(kv, "="); ok {
-			merged[k] = v
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
 		}
+		if _, dup := merged[k]; dup {
+			continue // first occurrence wins, matching libc getenv
+		}
+		merged[k] = v
 	}
 	maps.Copy(merged, callerEnv)
 	out := make([]string, 0, len(merged))
