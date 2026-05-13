@@ -64,6 +64,13 @@ func (s *Server) Serve(ctx context.Context) error {
 				return nil
 			}
 			logger.Error(ctx, err, "accept")
+			// Tear down the listener and any in-flight conns before
+			// joining: otherwise a handleConn wedged on a slow peer's
+			// framedWriter.Write would pin connWG.Wait forever. The
+			// ctx-cancel / net.ErrClosed paths already get this from
+			// the watcher goroutine or an external Close().
+			_ = s.listener.Close()
+			s.closeAllConns()
 			connWG.Wait()
 			return fmt.Errorf("accept: %w", err)
 		}
