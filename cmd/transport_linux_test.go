@@ -10,9 +10,8 @@ import (
 	"github.com/mdlayher/vsock"
 )
 
-// staticAddrConn is a minimal net.Conn whose RemoteAddr returns a caller-
-// supplied net.Addr. Only RemoteAddr is exercised by the host-only filter,
-// so the rest of the interface is no-op / trivial-default.
+// staticAddrConn is a net.Conn stub whose RemoteAddr returns a fixed addr;
+// only RemoteAddr is exercised by the host-only filter.
 type staticAddrConn struct {
 	addr net.Addr
 }
@@ -26,10 +25,8 @@ func (c *staticAddrConn) SetDeadline(_ time.Time) error      { return nil }
 func (c *staticAddrConn) SetReadDeadline(_ time.Time) error  { return nil }
 func (c *staticAddrConn) SetWriteDeadline(_ time.Time) error { return nil }
 
-// TestIsHostPeer locks in the host-only filter contract: only a vsock.Addr
-// with ContextID == vsock.Host is accepted. Non-host CIDs (guest-local) and
-// non-vsock RemoteAddr types are both rejected so a misconfigured listener
-// can't silently let unprivileged guest processes drive the agent.
+// Only vsock.Addr with ContextID == vsock.Host is accepted; guest-local
+// CIDs and non-vsock addrs must be rejected.
 func TestIsHostPeer(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

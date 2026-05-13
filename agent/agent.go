@@ -41,9 +41,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	logger := log.WithFunc("agent.Server.Serve")
 	logger.Infof(ctx, "agent listening on %s", s.listener.Addr())
 
-	// Reap the ctx watcher on every Serve return path — including the
-	// permanent-Accept-error case — otherwise the goroutine leaks until
-	// the caller (which may never) cancels ctx.
+	// done reaps the watcher on every return path, not just ctx-cancel.
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -64,11 +62,7 @@ func (s *Server) Serve(ctx context.Context) error {
 				return nil
 			}
 			logger.Error(ctx, err, "accept")
-			// Tear down the listener and any in-flight conns before
-			// joining: otherwise a handleConn wedged on a slow peer's
-			// framedWriter.Write would pin connWG.Wait forever. The
-			// ctx-cancel / net.ErrClosed paths already get this from
-			// the watcher goroutine or an external Close().
+			// Unwedge handlers stuck on slow peers before joining.
 			_ = s.listener.Close()
 			s.closeAllConns()
 			connWG.Wait()

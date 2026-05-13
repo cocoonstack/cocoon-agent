@@ -133,8 +133,7 @@ type vsockListener struct {
 	h      windows.Handle
 	port   uint32
 	closed atomic.Bool
-	// ctx is the agent's serve ctx — listener outlives any per-call ctx, so
-	// it's plumbed through at construction for Accept-loop diagnostic logging.
+	// ctx is the serve ctx, stashed for Accept-loop diagnostic logging.
 	ctx    context.Context
 	logger *log.Fields
 }

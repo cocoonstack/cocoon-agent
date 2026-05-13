@@ -148,11 +148,8 @@ func TestDecodeHandlesLargeFrame(t *testing.T) {
 	}
 }
 
-// TestFramedWriterAfterTerminal exercises the errTerminalFrameSent skip path
-// in framedWriter.Write: once the encoder has emitted a terminal frame, the
-// child's I/O pump may still call Write — these post-terminal writes must
-// surface errTerminalFrameSent and must NOT poison lastErr or trip cancel,
-// otherwise the post-Wait err()-join would mask the legitimate exit path.
+// Post-terminal Write must return errTerminalFrameSent without poisoning
+// lastErr or tripping cancel, else err()-join masks the real exit.
 func TestFramedWriterAfterTerminal(t *testing.T) {
 	t.Parallel()
 

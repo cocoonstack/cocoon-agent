@@ -69,10 +69,8 @@ readLoop:
 			if e := stdinReadErr.Load(); e != nil {
 				return 0, fmt.Errorf("read stdin: %w", *e)
 			}
-			// Prefer ctx.Err over io.EOF / "read frame": a ctx-cancel path
-			// (caller cancel, parent timeout) closes conn via runCancel, which
-			// surfaces here as EOF — the real cause is the cancellation, not
-			// a half-finished exchange.
+			// Prefer ctx.Err over EOF: ctx-cancel closes the conn,
+			// surfacing as EOF here.
 			if ctx.Err() != nil {
 				return 0, ctx.Err()
 			}
@@ -109,10 +107,7 @@ readLoop:
 		return 0, fmt.Errorf("read stdin: %w", *e)
 	}
 	if !sawExit {
-		// ctx-cancel races the agent's MsgExit: the watcher goroutine closes
-		// conn on cancel, the readLoop sees EOF, and we land here. Prefer the
-		// ctx error so the caller sees the cancellation, not a misleading
-		// "connection closed" wrapper around their own cancel.
+		// Same ctx-cancel-races-MsgExit case as the readLoop EOF path.
 		if ctx.Err() != nil {
 			return 0, ctx.Err()
 		}

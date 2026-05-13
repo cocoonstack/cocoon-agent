@@ -95,10 +95,8 @@ func TestServerStreamsStdin(t *testing.T) {
 	}
 }
 
-// TestServerMsgStdinCloseTerminatesChildStdin exercises the MsgStdinClose
-// mid-stream path: the child must observe EOF on stdin after the close frame
-// and exit 0. `wc -c` produces a deterministic byte count, so we can also
-// confirm the pre-close payload reached the child intact.
+// TestServerMsgStdinCloseTerminatesChildStdin: child must see EOF after the
+// close frame and exit 0; wc -c also confirms pre-close payload arrived.
 func TestServerMsgStdinCloseTerminatesChildStdin(t *testing.T) {
 	t.Parallel()
 	ctx, conn := dialTestServer(t)
@@ -254,13 +252,7 @@ func TestServerMergesEnvWithHost(t *testing.T) {
 	}
 }
 
-// TestServerMergesEnvCallerWins guards against the merge-order regression: a
-// caller-supplied value for a key that also exists in the host env must reach
-// the child, not be shadowed by the host's value. The historical bug was an
-// append-host-then-append-caller layout — under libc getenv (which returns the
-// FIRST matching entry), the host value survives.
-//
-// Cannot run with t.Parallel: t.Setenv mutates process-global os.Environ.
+// Not parallel: t.Setenv mutates process-global os.Environ.
 func TestServerMergesEnvCallerWins(t *testing.T) {
 	t.Setenv("COCOON_AGENT_OVERRIDE_VAR", "host-value")
 	ctx, conn := dialTestServer(t)
@@ -283,10 +275,8 @@ func TestServerMergesEnvCallerWins(t *testing.T) {
 	}
 }
 
-// errorAcceptListener satisfies net.Listener but synthesizes a permanent
-// non-net.ErrClosed Accept failure on demand. Used to exercise Serve's
-// permanent-error return path so we can prove the ctx watcher goroutine
-// gets reaped instead of leaking until ctx eventually cancels.
+// errorAcceptListener returns err on every Accept — drives Serve's
+// permanent-error return path.
 type errorAcceptListener struct {
 	err error
 }
@@ -300,18 +290,15 @@ func (l *errorAcceptListener) Addr() net.Addr {
 	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}
 }
 
-// TestServerWatcherExitsOnPermanentAcceptError guards against the watcher-
-// goroutine leak: when Accept fails with a non-net.ErrClosed permanent error
-// (e.g. EMFILE, syscall failure), Serve returns — and the <-ctx.Done watcher
-// must exit too. Without the done-channel reap path, the watcher persists
-// until the (potentially never-canceled) parent ctx fires.
+// TestServerWatcherExitsOnPermanentAcceptError: on a non-ErrClosed Accept
+// failure, Serve must reap the ctx watcher via the done channel rather than
+// leak it until the (possibly never-canceled) parent ctx fires.
 func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 	t.Parallel()
 	before := runtime.NumGoroutine()
 
 	srv := agent.NewServer(&errorAcceptListener{err: errors.New("synthetic permanent accept failure")})
-	// Use a long-lived ctx so the watcher couldn't exit via ctx.Done — only
-	// the done-channel reap path can release it.
+	// Long-lived ctx so only the done-channel path can release the watcher.
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -327,9 +314,7 @@ func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 		t.Fatal("Serve did not return after permanent accept error")
 	}
 
-	// Watcher exits asynchronously after the done-channel close; give the
-	// runtime a moment to reschedule then assert the goroutine count is
-	// back to baseline (allowing slack for testing-framework goroutines).
+	// Watcher exits async after close(done); poll until back to baseline.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if runtime.NumGoroutine() <= before {

@@ -146,10 +146,8 @@ func pumpStdin(ctx context.Context, w io.WriteCloser, frames <-chan Message, don
 	}
 }
 
-// mergeEnv layers caller env over os.Environ; caller keys win on collision.
-// Deduping via map matters because libc's getenv returns the FIRST match for
-// duplicate keys in envp — naive append(host, caller...) would leak the host
-// value through and silently lose caller overrides for PATH, HOME, etc.
+// mergeEnv layers caller env over os.Environ. Dedup is required: libc getenv
+// returns the first match, so duplicate keys would shadow caller overrides.
 func mergeEnv(callerEnv map[string]string) []string {
 	host := os.Environ()
 	merged := make(map[string]string, len(host)+len(callerEnv))

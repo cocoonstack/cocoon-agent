@@ -21,9 +21,8 @@ func NewRootCmd() *cobra.Command {
 		Use:     "cocoon-agent",
 		Short:   "vsock-based command exec agent for Cocoon-managed VMs",
 		Version: fmt.Sprintf("%s (rev=%s built=%s)", version.VERSION, version.REVISION, version.BUILTAT),
-		// run() logs real errors via logger.Error and translates exitCodeError
-		// into an exit status; suppress cobra's default "Error: ...\nUsage:..."
-		// dump so a non-zero child exit doesn't print a spurious usage banner.
+		// run() handles its own logging and exit codes; suppress cobra's
+		// Error/Usage dump so child-exit failures stay quiet.
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
