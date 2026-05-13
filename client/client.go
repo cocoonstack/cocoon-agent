@@ -69,11 +69,13 @@ readLoop:
 			if e := stdinReadErr.Load(); e != nil {
 				return 0, fmt.Errorf("read stdin: %w", *e)
 			}
-			if errors.Is(err, io.EOF) {
-				break
-			}
+			// Prefer ctx.Err over EOF: ctx-cancel closes the conn,
+			// surfacing as EOF here.
 			if ctx.Err() != nil {
 				return 0, ctx.Err()
+			}
+			if errors.Is(err, io.EOF) {
+				break
 			}
 			return 0, fmt.Errorf("read frame: %w", err)
 		}
@@ -105,6 +107,10 @@ readLoop:
 		return 0, fmt.Errorf("read stdin: %w", *e)
 	}
 	if !sawExit {
+		// Same ctx-cancel-races-MsgExit case as the readLoop EOF path.
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
 		return 0, errors.New("agent: connection closed before exit frame")
 	}
 	return exitCode, nil

@@ -3,6 +3,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -13,7 +14,7 @@ import (
 // makes no sense.
 var errVsockUnsupported = errors.New("vsock is only supported on linux and windows; cross-build with GOOS=linux or GOOS=windows for production")
 
-func listenVsock(_ uint32) (net.Listener, error) {
+func listenVsock(_ context.Context, _ uint32) (net.Listener, error) {
 	return nil, errVsockUnsupported
 }
 

@@ -41,10 +41,16 @@ func (s *Server) Serve(ctx context.Context) error {
 	logger := log.WithFunc("agent.Server.Serve")
 	logger.Infof(ctx, "agent listening on %s", s.listener.Addr())
 
+	// done reaps the watcher on every return path, not just ctx-cancel.
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		<-ctx.Done()
-		_ = s.listener.Close()
-		s.closeAllConns()
+		select {
+		case <-ctx.Done():
+			_ = s.listener.Close()
+			s.closeAllConns()
+		case <-done:
+		}
 	}()
 
 	var connWG sync.WaitGroup
@@ -56,6 +62,10 @@ func (s *Server) Serve(ctx context.Context) error {
 				return nil
 			}
 			logger.Error(ctx, err, "accept")
+			// Unwedge handlers stuck on slow peers before joining.
+			_ = s.listener.Close()
+			s.closeAllConns()
+			connWG.Wait()
 			return fmt.Errorf("accept: %w", err)
 		}
 		connWG.Go(func() { s.handleConn(ctx, conn) })

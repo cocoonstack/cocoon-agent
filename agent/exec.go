@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // processController hooks platform-specific child-lifecycle steps into
@@ -144,12 +146,24 @@ func pumpStdin(ctx context.Context, w io.WriteCloser, frames <-chan Message, don
 	}
 }
 
-// mergeEnv layers caller env over os.Environ; caller keys win on collision.
-func mergeEnv(env map[string]string) []string {
-	hostEnv := os.Environ()
-	out := make([]string, 0, len(hostEnv)+len(env))
-	out = append(out, hostEnv...)
-	for k, v := range env {
+// mergeEnv layers caller env over os.Environ. Dedup is required: libc getenv
+// returns the first match, so duplicate keys would shadow caller overrides.
+func mergeEnv(callerEnv map[string]string) []string {
+	host := os.Environ()
+	merged := make(map[string]string, len(host)+len(callerEnv))
+	for _, kv := range host {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		if _, dup := merged[k]; dup {
+			continue // first occurrence wins, matching libc getenv
+		}
+		merged[k] = v
+	}
+	maps.Copy(merged, callerEnv)
+	out := make([]string, 0, len(merged))
+	for k, v := range merged {
 		out = append(out, k+"="+v)
 	}
 	return out

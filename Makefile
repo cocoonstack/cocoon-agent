@@ -44,7 +44,7 @@ GOOSES ?= linux darwin windows
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCILINT)
 $(GOLANGCILINT):
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOLANGCILINT_ROOT) $(GOLANGCILINT_VERSION)
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/$(GOLANGCILINT_VERSION)/install.sh | sh -s -- -b $(GOLANGCILINT_ROOT) $(GOLANGCILINT_VERSION)
 
 .PHONY: gofumpt
 gofumpt: $(GOFMT)

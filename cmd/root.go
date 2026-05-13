@@ -21,6 +21,10 @@ func NewRootCmd() *cobra.Command {
 		Use:     "cocoon-agent",
 		Short:   "vsock-based command exec agent for Cocoon-managed VMs",
 		Version: fmt.Sprintf("%s (rev=%s built=%s)", version.VERSION, version.REVISION, version.BUILTAT),
+		// run() handles its own logging and exit codes; suppress cobra's
+		// Error/Usage dump so child-exit failures stay quiet.
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 	rootCmd.AddCommand(newServeCmd())
 	rootCmd.AddCommand(newClientCmd())

@@ -3,15 +3,17 @@ Description=Cocoon agent (vsock command exec)
 Documentation=https://github.com/cocoonstack/cocoon-agent
 # vsock is host-local; no network or DNS dependency.
 
+# Cap restart churn so a wedged vsock state can't peg journald.
+StartLimitBurst=5
+StartLimitIntervalSec=60s
+
 [Service]
 Type=simple
 User=root
 Group=root
-# Best-effort load of vsock transport. Most distro kernels build it in
-# or auto-load on virtio-vsock device probe; the leading dash keeps the
-# unit alive on minimal kernels that ship without the module entirely
-# (e.g. ubuntu linux-image-virtual in cocoon's OCI guest images).
-ExecStartPre=-/sbin/modprobe vhost_vsock
+# No modprobe ExecStartPre: vhost_vsock is host-side; the guest gets
+# virtio_transport_common + vmw_vsock_virtio_transport via device probe,
+# and listenVsockWithRetry handles a late bind window.
 ExecStart=/usr/local/bin/cocoon-agent serve
 Environment=AGENT_LOG_LEVEL=info
 Restart=always

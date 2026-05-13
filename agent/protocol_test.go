@@ -147,3 +147,33 @@ func TestDecodeHandlesLargeFrame(t *testing.T) {
 		t.Errorf("payload mismatch: got %d bytes, want %d", len(got.Data), len(payload))
 	}
 }
+
+// Post-terminal Write must return errTerminalFrameSent without poisoning
+// lastErr or tripping cancel, else err()-join masks the real exit.
+func TestFramedWriterAfterTerminal(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+	if err := enc.Encode(Message{Type: MsgError, Message: "kaboom"}); err != nil {
+		t.Fatalf("encode terminal: %v", err)
+	}
+
+	var cancelCalled bool
+	cancel := func() { cancelCalled = true }
+	w := newFramedWriter(MsgStdout, enc, cancel)
+
+	n, err := w.Write([]byte("late stdout chunk"))
+	if !errors.Is(err, errTerminalFrameSent) {
+		t.Fatalf("post-terminal Write err = %v, want %v", err, errTerminalFrameSent)
+	}
+	if n != 0 {
+		t.Errorf("post-terminal Write n = %d, want 0", n)
+	}
+	if cancelCalled {
+		t.Error("post-terminal Write must not call cancel")
+	}
+	if got := w.err(); got != nil {
+		t.Errorf("post-terminal Write must not poison lastErr, got %v", got)
+	}
+}

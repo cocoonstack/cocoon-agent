@@ -12,6 +12,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +23,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/projecteru2/core/log"
 )
 
 const (
@@ -78,7 +81,7 @@ type sockaddrVM struct {
 	_         [3]uint8
 }
 
-func listenVsock(port uint32) (net.Listener, error) {
+func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
 	if err := wsaInit(); err != nil {
 		return nil, err
 	}
@@ -97,7 +100,12 @@ func listenVsock(port uint32) (net.Listener, error) {
 		_ = windows.Closesocket(h)
 		return nil, fmt.Errorf("vsock listen: %w", callErr)
 	}
-	return &vsockListener{h: h, port: port}, nil
+	return &vsockListener{
+		h:      h,
+		port:   port,
+		ctx:    ctx,
+		logger: log.WithFunc("cmd.vsockListener.Accept"),
+	}, nil
 }
 
 func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
@@ -125,6 +133,9 @@ type vsockListener struct {
 	h      windows.Handle
 	port   uint32
 	closed atomic.Bool
+	// ctx is the serve ctx, stashed for Accept-loop diagnostic logging.
+	ctx    context.Context
+	logger *log.Fields
 }
 
 // Accept blocks until a host-originated connection arrives. Connections from
@@ -147,6 +158,7 @@ func (l *vsockListener) Accept() (net.Conn, error) {
 			peerPort:  sa.Port,
 		}
 		if sa.CID != vmAddrCidHost {
+			l.logger.Warnf(l.ctx, "rejecting non-host vsock peer cid=%d port=%d", sa.CID, sa.Port)
 			_ = conn.Close()
 			continue
 		}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,11 @@ import (
 
 	"github.com/cocoonstack/cocoon-agent/agent"
 	"github.com/cocoonstack/cocoon-agent/client"
+)
+
+const (
+	initialGoroutineDumpSize = 1 << 16
+	maxGoroutineDumpSize     = 1 << 24
 )
 
 // dialTestServer runs the agent over loopback TCP and dials a client conn.
@@ -25,7 +31,7 @@ func dialTestServer(t *testing.T) (context.Context, net.Conn) {
 		t.Fatalf("listen tcp: %v", err)
 	}
 	srv := agent.NewServer(tcp)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second) //nolint:mnd
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	var wg sync.WaitGroup
 	wg.Go(func() { _ = srv.Serve(ctx) })
 	conn, err := net.Dial("tcp", tcp.Addr().String())
@@ -91,6 +97,32 @@ func TestServerStreamsStdin(t *testing.T) {
 	}
 	if got := strings.TrimSpace(stdout.String()); got != "hello-stdin" {
 		t.Errorf("stdout = %q, want \"hello-stdin\"", got)
+	}
+}
+
+// TestServerMsgStdinCloseTerminatesChildStdin: child must see EOF after the
+// close frame and exit 0; wc -c also confirms pre-close payload arrived.
+func TestServerMsgStdinCloseTerminatesChildStdin(t *testing.T) {
+	t.Parallel()
+	ctx, conn := dialTestServer(t)
+
+	payload := "abcde"
+	var stdout bytes.Buffer
+	exit, err := client.Run(
+		ctx, conn,
+		[]string{"sh", "-c", "wc -c"},
+		nil,
+		strings.NewReader(payload),
+		&stdout, io.Discard,
+	)
+	if err != nil {
+		t.Fatalf("client run: %v", err)
+	}
+	if exit != 0 {
+		t.Errorf("exit = %d, want 0", exit)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "5" {
+		t.Errorf("wc -c stdout = %q, want \"5\"", got)
 	}
 }
 
@@ -223,4 +255,97 @@ func TestServerMergesEnvWithHost(t *testing.T) {
 	if !strings.Contains(out, "PATH=") || strings.Contains(out, "PATH=\n") {
 		t.Errorf("host PATH not preserved on merge: %q", out)
 	}
+}
+
+// Not parallel: t.Setenv mutates process-global os.Environ.
+func TestServerMergesEnvCallerWins(t *testing.T) {
+	t.Setenv("COCOON_AGENT_OVERRIDE_VAR", "host-value")
+	ctx, conn := dialTestServer(t)
+
+	var stdout bytes.Buffer
+	exit, err := client.Run(
+		ctx, conn,
+		[]string{"sh", "-c", "printf %s \"$COCOON_AGENT_OVERRIDE_VAR\""},
+		map[string]string{"COCOON_AGENT_OVERRIDE_VAR": "caller-value"},
+		nil, &stdout, io.Discard,
+	)
+	if err != nil {
+		t.Fatalf("client run: %v", err)
+	}
+	if exit != 0 {
+		t.Errorf("exit = %d, want 0", exit)
+	}
+	if got := stdout.String(); got != "caller-value" {
+		t.Errorf("caller env did not win on collision: got %q, want %q", got, "caller-value")
+	}
+}
+
+// errorAcceptListener returns err on every Accept — drives Serve's
+// permanent-error return path.
+type errorAcceptListener struct {
+	err error
+}
+
+func (l *errorAcceptListener) Accept() (net.Conn, error) {
+	return nil, l.err
+}
+
+func (l *errorAcceptListener) Close() error { return nil }
+func (l *errorAcceptListener) Addr() net.Addr {
+	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}
+}
+
+func goroutineDump() string {
+	size := initialGoroutineDumpSize
+	for {
+		buf := make([]byte, size)
+		n := runtime.Stack(buf, true)
+		if n < len(buf) || size == maxGoroutineDumpSize {
+			return string(buf[:n])
+		}
+		size = min(size*2, maxGoroutineDumpSize)
+	}
+}
+
+func countServeWatcherGoroutines() int {
+	return strings.Count(goroutineDump(), "(*Server).Serve.func1")
+}
+
+// TestServerWatcherExitsOnPermanentAcceptError: on a non-ErrClosed Accept
+// failure, Serve must reap the ctx watcher via the done channel rather than
+// leak it until the (possibly never-canceled) parent ctx fires.
+//
+// Not parallel: asserts against the specific Serve watcher goroutine and keeps
+// other tests from creating extra matching stacks while it samples.
+func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
+	before := countServeWatcherGoroutines()
+
+	srv := agent.NewServer(&errorAcceptListener{err: errors.New("synthetic permanent accept failure")})
+	// Long-lived ctx so only the done-channel path can release the watcher.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(ctx) }()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected permanent accept error to surface")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return after permanent accept error")
+	}
+
+	// Watcher exits async after close(done); poll until the specific watcher
+	// stack count returns to baseline.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if countServeWatcherGoroutines() <= before {
+			return
+		}
+		runtime.Gosched()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("Serve watcher goroutine still present:\n%s", goroutineDump())
 }
