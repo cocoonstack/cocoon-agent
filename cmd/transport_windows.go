@@ -22,9 +22,8 @@ import (
 	"time"
 	"unsafe"
 
-	"golang.org/x/sys/windows"
-
 	"github.com/projecteru2/core/log"
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -41,6 +40,10 @@ const (
 )
 
 var (
+	_ net.Listener = (*vsockListener)(nil)
+	_ net.Conn     = (*vsockConn)(nil)
+	_ net.Addr     = (*vsockAddr)(nil)
+
 	modws2_32      = windows.NewLazySystemDLL("ws2_32.dll")
 	procBind       = modws2_32.NewProc("bind")
 	procListen     = modws2_32.NewProc("listen")
@@ -64,10 +67,6 @@ var (
 	})
 
 	errDeadlineUnsupported = errors.New("vsock: deadline unsupported on windows")
-
-	_ net.Listener = (*vsockListener)(nil)
-	_ net.Conn     = (*vsockConn)(nil)
-	_ net.Addr     = (*vsockAddr)(nil)
 )
 
 // sockaddrVM matches `struct sockaddr_vm` exactly (16 bytes). Field order
@@ -81,13 +80,23 @@ type sockaddrVM struct {
 	_         [3]uint8
 }
 
-func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
+// newVsockSocket lazily initializes Winsock and opens an AF_VSOCK stream
+// socket shared by the listen and dial paths.
+func newVsockSocket() (windows.Handle, error) {
 	if err := wsaInit(); err != nil {
-		return nil, err
+		return 0, err
 	}
 	h, err := windows.Socket(afVsock, windows.SOCK_STREAM, 0)
 	if err != nil {
-		return nil, fmt.Errorf("vsock socket: %w", err)
+		return 0, fmt.Errorf("vsock socket: %w", err)
+	}
+	return h, nil
+}
+
+func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
+	h, err := newVsockSocket()
+	if err != nil {
+		return nil, err
 	}
 	sa := sockaddrVM{Family: afVsock, Port: port, CID: vmAddrCidAny}
 	r, _, callErr := procBind.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock bind requires raw pointer
@@ -109,12 +118,9 @@ func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
 }
 
 func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
-	if err := wsaInit(); err != nil {
-		return nil, err
-	}
-	h, err := windows.Socket(afVsock, windows.SOCK_STREAM, 0)
+	h, err := newVsockSocket()
 	if err != nil {
-		return nil, fmt.Errorf("vsock socket: %w", err)
+		return nil, err
 	}
 	sa := sockaddrVM{Family: afVsock, Port: port, CID: cid}
 	r, _, callErr := procConnect.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock connect requires raw pointer

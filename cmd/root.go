@@ -59,7 +59,7 @@ func run() int {
 		if errors.As(err, &ec) {
 			return ec.code
 		}
-		log.WithFunc("cmd.Execute").Error(ctx, err, "command failed")
+		log.WithFunc("cmd.run").Error(ctx, err, "command failed")
 		return 1
 	}
 	return 0

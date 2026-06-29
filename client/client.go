@@ -66,8 +66,8 @@ readLoop:
 			// Stdin read failure trips runCancel → conn.Close → this
 			// EOF/closed read. Surface the stdin error first so the
 			// caller sees the real cause.
-			if e := stdinReadErr.Load(); e != nil {
-				return 0, fmt.Errorf("read stdin: %w", *e)
+			if serr := stdinErr(&stdinReadErr); serr != nil {
+				return 0, serr
 			}
 			// Prefer ctx.Err over EOF: ctx-cancel closes the conn,
 			// surfacing as EOF here.
@@ -103,8 +103,8 @@ readLoop:
 		}
 	}
 
-	if e := stdinReadErr.Load(); e != nil {
-		return 0, fmt.Errorf("read stdin: %w", *e)
+	if serr := stdinErr(&stdinReadErr); serr != nil {
+		return 0, serr
 	}
 	if !sawExit {
 		// Same ctx-cancel-races-MsgExit case as the readLoop EOF path.
@@ -142,4 +142,13 @@ func pumpStdin(r io.Reader, enc *agent.Encoder, errOut *atomic.Pointer[error], c
 			return
 		}
 	}
+}
+
+// stdinErr returns the recorded stdin read failure wrapped, or nil if the
+// pump never stored one.
+func stdinErr(p *atomic.Pointer[error]) error {
+	if e := p.Load(); e != nil {
+		return fmt.Errorf("read stdin: %w", *e)
+	}
+	return nil
 }

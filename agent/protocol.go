@@ -111,10 +111,6 @@ func (e *Encoder) SendErrorf(format string, args ...any) error {
 	return e.Encode(Message{Type: MsgError, Message: fmt.Sprintf(format, args...)})
 }
 
-func isTerminalFrame(msgType string) bool {
-	return msgType == MsgExit || msgType == MsgError
-}
-
 // framedWriter adapts io.Writer onto framed messages for exec.Cmd's
 // stdout/stderr; the first encode failure fires cancel to kill the child.
 type framedWriter struct {
@@ -155,4 +151,8 @@ func (w *framedWriter) err() error {
 		return *e
 	}
 	return nil
+}
+
+func isTerminalFrame(msgType string) bool {
+	return msgType == MsgExit || msgType == MsgError
 }

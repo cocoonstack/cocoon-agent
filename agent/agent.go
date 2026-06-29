@@ -47,8 +47,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	go func() {
 		select {
 		case <-ctx.Done():
-			_ = s.listener.Close()
-			s.closeAllConns()
+			_ = s.shutdown()
 		case <-done:
 		}
 	}()
@@ -63,8 +62,7 @@ func (s *Server) Serve(ctx context.Context) error {
 			}
 			logger.Error(ctx, err, "accept")
 			// Unwedge handlers stuck on slow peers before joining.
-			_ = s.listener.Close()
-			s.closeAllConns()
+			_ = s.shutdown()
 			connWG.Wait()
 			return fmt.Errorf("accept: %w", err)
 		}
@@ -75,9 +73,7 @@ func (s *Server) Serve(ctx context.Context) error {
 // Close stops the accept loop and tears down every in-flight session,
 // mirroring ctx-cancel so it can't hang on slow peers.
 func (s *Server) Close() error {
-	err := s.listener.Close()
-	s.closeAllConns()
-	return err
+	return s.shutdown()
 }
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
@@ -162,4 +158,12 @@ func (s *Server) closeAllConns() {
 	for c := range s.conns {
 		_ = c.Close()
 	}
+}
+
+// shutdown closes the listener and every in-flight conn. Closing conns
+// unwedges handlers pinned writing to a slow peer so connWG.Wait can return.
+func (s *Server) shutdown() error {
+	err := s.listener.Close()
+	s.closeAllConns()
+	return err
 }
