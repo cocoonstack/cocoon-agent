@@ -278,12 +278,8 @@ func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 	t.Fatalf("Serve watcher goroutine still present:\n%s", goroutineDump())
 }
 
-// TestServerDrainsStdinAfterEarlyChildExit guards the handleConn stdin-reader
-// leak: when a client keeps streaming stdin to a command that already exited,
-// the reader parks on a full stdinFrames send. handleConn must cancel the
-// session ctx (not just close conn) to release it, else it wedges forever.
-//
-// Not parallel: samples the process-wide goroutine set.
+// A reader parked on a full stdinFrames send is only released by ctx cancel,
+// not conn.Close. Not parallel: samples the process-wide goroutine set.
 func TestServerDrainsStdinAfterEarlyChildExit(t *testing.T) {
 	before := countGoroutines(handleConnFrame)
 	_, conn := dialTestServer(t)
@@ -322,9 +318,8 @@ func TestServerDrainsStdinAfterEarlyChildExit(t *testing.T) {
 	t.Fatalf("handleConn goroutines leaked:\n%s", goroutineDump())
 }
 
-// dialTestServer runs the agent over loopback TCP and dials a client conn.
-// Cleanup (cancel ctx, close server, wait for Serve to return, close conn)
-// is registered via t.Cleanup so callers don't repeat it per test.
+// dialTestServer runs the agent over loopback TCP and dials a client conn;
+// full teardown is registered via t.Cleanup so callers don't repeat it.
 func dialTestServer(t *testing.T) (context.Context, net.Conn) {
 	t.Helper()
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
