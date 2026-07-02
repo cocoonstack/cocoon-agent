@@ -11,21 +11,6 @@ import (
 	"github.com/mdlayher/vsock"
 )
 
-// staticAddrConn is a net.Conn stub whose RemoteAddr returns a fixed addr;
-// only RemoteAddr is exercised by the host-only filter.
-type staticAddrConn struct {
-	addr net.Addr
-}
-
-func (c *staticAddrConn) Read(_ []byte) (int, error)         { return 0, io.EOF }
-func (c *staticAddrConn) Write(p []byte) (int, error)        { return len(p), nil }
-func (c *staticAddrConn) Close() error                       { return nil }
-func (c *staticAddrConn) LocalAddr() net.Addr                { return c.addr }
-func (c *staticAddrConn) RemoteAddr() net.Addr               { return c.addr }
-func (c *staticAddrConn) SetDeadline(_ time.Time) error      { return nil }
-func (c *staticAddrConn) SetReadDeadline(_ time.Time) error  { return nil }
-func (c *staticAddrConn) SetWriteDeadline(_ time.Time) error { return nil }
-
 // Only vsock.Addr with ContextID == vsock.Host is accepted; guest-local
 // CIDs and non-vsock addrs must be rejected.
 func TestIsHostPeer(t *testing.T) {
@@ -60,3 +45,18 @@ func TestIsHostPeer(t *testing.T) {
 		})
 	}
 }
+
+// staticAddrConn is a net.Conn stub whose RemoteAddr returns a fixed addr;
+// only RemoteAddr is exercised by the host-only filter.
+type staticAddrConn struct {
+	addr net.Addr
+}
+
+func (c *staticAddrConn) Read(_ []byte) (int, error)         { return 0, io.EOF }
+func (c *staticAddrConn) Write(p []byte) (int, error)        { return len(p), nil }
+func (c *staticAddrConn) Close() error                       { return nil }
+func (c *staticAddrConn) LocalAddr() net.Addr                { return c.addr }
+func (c *staticAddrConn) RemoteAddr() net.Addr               { return c.addr }
+func (c *staticAddrConn) SetDeadline(_ time.Time) error      { return nil }
+func (c *staticAddrConn) SetReadDeadline(_ time.Time) error  { return nil }
+func (c *staticAddrConn) SetWriteDeadline(_ time.Time) error { return nil }

@@ -12,8 +12,6 @@ import (
 	"github.com/projecteru2/core/log"
 )
 
-var _ net.Listener = (*hostOnlyListener)(nil)
-
 func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
 	l, err := vsock.Listen(port, nil)
 	if err != nil {
@@ -33,6 +31,8 @@ func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
 	}
 	return conn, nil
 }
+
+var _ net.Listener = (*hostOnlyListener)(nil)
 
 // hostOnlyListener rejects any peer whose CID is not VMADDR_CID_HOST.
 // Without this, a guest-local unprivileged process could connect via

@@ -134,8 +134,9 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	if err := runExec(execCtx, first.Argv, first.Env, stdinFrames, enc); err != nil {
 		logger.Warnf(ctx, "exec session ended: %v", err)
 	}
-	// Close conn so the stdin goroutine's blocking Decode returns —
-	// otherwise it leaks until the client side closes first.
+	// Join the stdin reader without hanging: cancel unblocks it when parked on a
+	// full stdinFrames send (child exited early), Close when parked in Decode.
+	execCancel(nil)
 	_ = conn.Close()
 	<-stdinDone
 }

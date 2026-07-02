@@ -40,10 +40,6 @@ const (
 )
 
 var (
-	_ net.Listener = (*vsockListener)(nil)
-	_ net.Conn     = (*vsockConn)(nil)
-	_ net.Addr     = (*vsockAddr)(nil)
-
 	modws2_32      = windows.NewLazySystemDLL("ws2_32.dll")
 	procBind       = modws2_32.NewProc("bind")
 	procListen     = modws2_32.NewProc("listen")
@@ -135,6 +131,8 @@ func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
 	}, nil
 }
 
+var _ net.Listener = (*vsockListener)(nil)
+
 type vsockListener struct {
 	h      windows.Handle
 	port   uint32
@@ -182,6 +180,8 @@ func (l *vsockListener) Close() error {
 func (l *vsockListener) Addr() net.Addr {
 	return &vsockAddr{cid: vmAddrCidAny, port: l.port}
 }
+
+var _ net.Conn = (*vsockConn)(nil)
 
 type vsockConn struct {
 	h         windows.Handle
@@ -251,6 +251,8 @@ func (c *vsockConn) RemoteAddr() net.Addr {
 func (c *vsockConn) SetDeadline(_ time.Time) error      { return errDeadlineUnsupported }
 func (c *vsockConn) SetReadDeadline(_ time.Time) error  { return errDeadlineUnsupported }
 func (c *vsockConn) SetWriteDeadline(_ time.Time) error { return errDeadlineUnsupported }
+
+var _ net.Addr = (*vsockAddr)(nil)
 
 type vsockAddr struct {
 	cid, port uint32

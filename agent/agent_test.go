@@ -19,36 +19,10 @@ import (
 const (
 	initialGoroutineDumpSize = 1 << 16
 	maxGoroutineDumpSize     = 1 << 24
-)
 
-// dialTestServer runs the agent over loopback TCP and dials a client conn.
-// Cleanup (cancel ctx, close server, wait for Serve to return, close conn)
-// is registered via t.Cleanup so callers don't repeat it per test.
-func dialTestServer(t *testing.T) (context.Context, net.Conn) {
-	t.Helper()
-	tcp, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen tcp: %v", err)
-	}
-	srv := agent.NewServer(tcp)
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	var wg sync.WaitGroup
-	wg.Go(func() { _ = srv.Serve(ctx) })
-	conn, err := net.Dial("tcp", tcp.Addr().String())
-	if err != nil {
-		cancel()
-		_ = srv.Close()
-		wg.Wait()
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() {
-		cancel()
-		_ = srv.Close()
-		wg.Wait()
-		_ = conn.Close()
-	})
-	return ctx, conn
-}
+	serveWatcherFrame = "(*Server).Serve.func1"
+	handleConnFrame   = "(*Server).handleConn"
+)
 
 func TestServerExecHelloWorld(t *testing.T) {
 	t.Parallel()
@@ -216,21 +190,6 @@ func TestClientPropagatesStdinReadError(t *testing.T) {
 	}
 }
 
-type erroringReader struct {
-	payload []byte
-	after   int
-	err     error
-}
-
-func (r *erroringReader) Read(p []byte) (int, error) {
-	if r.after > 0 {
-		n := copy(p, r.payload)
-		r.after = 0
-		return n, nil
-	}
-	return 0, r.err
-}
-
 func TestServerMergesEnvWithHost(t *testing.T) {
 	t.Parallel()
 	ctx, conn := dialTestServer(t)
@@ -280,6 +239,133 @@ func TestServerMergesEnvCallerWins(t *testing.T) {
 	}
 }
 
+// TestServerWatcherExitsOnPermanentAcceptError: on a non-ErrClosed Accept
+// failure, Serve must reap the ctx watcher via the done channel rather than
+// leak it until the (possibly never-canceled) parent ctx fires.
+//
+// Not parallel: asserts against the specific Serve watcher goroutine and keeps
+// other tests from creating extra matching stacks while it samples.
+func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
+	before := countGoroutines(serveWatcherFrame)
+
+	srv := agent.NewServer(&errorAcceptListener{err: errors.New("synthetic permanent accept failure")})
+	// Long-lived ctx so only the done-channel path can release the watcher.
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(ctx) }()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected permanent accept error to surface")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return after permanent accept error")
+	}
+
+	// Watcher exits async after close(done); poll until the specific watcher
+	// stack count returns to baseline.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if countGoroutines(serveWatcherFrame) <= before {
+			return
+		}
+		runtime.Gosched()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("Serve watcher goroutine still present:\n%s", goroutineDump())
+}
+
+// TestServerDrainsStdinAfterEarlyChildExit guards the handleConn stdin-reader
+// leak: when a client keeps streaming stdin to a command that already exited,
+// the reader parks on a full stdinFrames send. handleConn must cancel the
+// session ctx (not just close conn) to release it, else it wedges forever.
+//
+// Not parallel: samples the process-wide goroutine set.
+func TestServerDrainsStdinAfterEarlyChildExit(t *testing.T) {
+	before := countGoroutines(handleConnFrame)
+	_, conn := dialTestServer(t)
+
+	enc := agent.NewEncoder(conn)
+	if err := enc.Encode(agent.Message{Type: agent.MsgExec, Argv: []string{"sh", "-c", "exit 0"}}); err != nil {
+		t.Fatalf("encode exec: %v", err)
+	}
+	// Flood stdin so the server's frame reader fills stdinFrames while the
+	// exited child leaves the pump unable to drain it.
+	go func() {
+		chunk := make([]byte, 32*1024)
+		for enc.Encode(agent.Message{Type: agent.MsgStdin, Data: chunk}) == nil {
+		}
+	}()
+
+	dec := agent.NewDecoder(conn)
+	for {
+		frame, err := dec.Decode()
+		if err != nil {
+			break
+		}
+		if frame.Type == agent.MsgExit || frame.Type == agent.MsgError {
+			break
+		}
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if countGoroutines(handleConnFrame) <= before {
+			return
+		}
+		runtime.Gosched()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("handleConn goroutines leaked:\n%s", goroutineDump())
+}
+
+// dialTestServer runs the agent over loopback TCP and dials a client conn.
+// Cleanup (cancel ctx, close server, wait for Serve to return, close conn)
+// is registered via t.Cleanup so callers don't repeat it per test.
+func dialTestServer(t *testing.T) (context.Context, net.Conn) {
+	t.Helper()
+	tcp, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen tcp: %v", err)
+	}
+	srv := agent.NewServer(tcp)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	var wg sync.WaitGroup
+	wg.Go(func() { _ = srv.Serve(ctx) })
+	conn, err := net.Dial("tcp", tcp.Addr().String())
+	if err != nil {
+		cancel()
+		_ = srv.Close()
+		wg.Wait()
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		_ = srv.Close()
+		wg.Wait()
+		_ = conn.Close()
+	})
+	return ctx, conn
+}
+
+type erroringReader struct {
+	payload []byte
+	after   int
+	err     error
+}
+
+func (r *erroringReader) Read(p []byte) (int, error) {
+	if r.after > 0 {
+		n := copy(p, r.payload)
+		r.after = 0
+		return n, nil
+	}
+	return 0, r.err
+}
+
 // errorAcceptListener returns err on every Accept — drives Serve's
 // permanent-error return path.
 type errorAcceptListener struct {
@@ -307,45 +393,6 @@ func goroutineDump() string {
 	}
 }
 
-func countServeWatcherGoroutines() int {
-	return strings.Count(goroutineDump(), "(*Server).Serve.func1")
-}
-
-// TestServerWatcherExitsOnPermanentAcceptError: on a non-ErrClosed Accept
-// failure, Serve must reap the ctx watcher via the done channel rather than
-// leak it until the (possibly never-canceled) parent ctx fires.
-//
-// Not parallel: asserts against the specific Serve watcher goroutine and keeps
-// other tests from creating extra matching stacks while it samples.
-func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
-	before := countServeWatcherGoroutines()
-
-	srv := agent.NewServer(&errorAcceptListener{err: errors.New("synthetic permanent accept failure")})
-	// Long-lived ctx so only the done-channel path can release the watcher.
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	errCh := make(chan error, 1)
-	go func() { errCh <- srv.Serve(ctx) }()
-
-	select {
-	case err := <-errCh:
-		if err == nil {
-			t.Fatal("expected permanent accept error to surface")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Serve did not return after permanent accept error")
-	}
-
-	// Watcher exits async after close(done); poll until the specific watcher
-	// stack count returns to baseline.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if countServeWatcherGoroutines() <= before {
-			return
-		}
-		runtime.Gosched()
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("Serve watcher goroutine still present:\n%s", goroutineDump())
+func countGoroutines(substr string) int {
+	return strings.Count(goroutineDump(), substr)
 }
