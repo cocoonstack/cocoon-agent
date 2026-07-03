@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"unsafe"
 
+	"github.com/projecteru2/core/log"
 	"golang.org/x/sys/unix"
 )
 
@@ -35,6 +35,7 @@ func runReseed(ctx context.Context, req Message, enc *Encoder) error {
 	if err := reseedURandom(req.Data); err != nil {
 		errs = append(errs, err)
 	}
+	clear(req.Data) // host entropy is single-use; don't leave it on the heap
 	if err := os.Remove(systemdRandomSeed); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		errs = append(errs, fmt.Errorf("remove systemd random seed: %w", err))
 	}
@@ -89,6 +90,7 @@ func addEntropy(fd int, data []byte) error {
 	bufSize := uint32(len(data))         //nolint:gosec // len(data) capped at maxReseedEntropyBytes above
 
 	buf := make([]byte, 8+len(data))
+	defer clear(buf) // the payload copy is single-use; zero it after the mix
 	binary.NativeEndian.PutUint32(buf[0:4], entropyBits)
 	binary.NativeEndian.PutUint32(buf[4:8], bufSize)
 	copy(buf[8:], data)
@@ -106,8 +108,11 @@ func reseedCRNG(fd int) error {
 	return nil
 }
 
-// regenMachineID truncates /etc/machine-id and regenerates it, skipping
-// silently on systems that don't have the file (e.g. Android).
+// regenMachineID overwrites /etc/machine-id with a fresh random id so clones of
+// one snapshot don't share it. systemd-machine-id-setup is deliberately avoided:
+// in a VM it derives the id from the SMBIOS product_uuid, which a snapshot clone
+// inherits verbatim — every clone would regenerate the same id. Skips silently
+// when the file is absent (e.g. Android).
 func regenMachineID(ctx context.Context) error {
 	if _, err := os.Stat(machineIDPath); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -115,24 +120,20 @@ func regenMachineID(ctx context.Context) error {
 		}
 		return fmt.Errorf("stat %s: %w", machineIDPath, err)
 	}
-	if err := os.Truncate(machineIDPath, 0); err != nil {
-		return fmt.Errorf("truncate %s: %w", machineIDPath, err)
-	}
-	if err := dropStaleDBusMachineID(dbusMachineIDPath); err != nil {
+	if err := writeRandomMachineID(); err != nil {
 		return err
 	}
-	if path, err := exec.LookPath("systemd-machine-id-setup"); err == nil {
-		if err := exec.CommandContext(ctx, path).Run(); err == nil { //nolint:gosec // path resolved by LookPath for a fixed binary name, not user input
-			return nil
-		}
-		// Fall through: a failed setup must not leave the truncated file empty.
+	// The D-Bus copy is secondary; /etc/machine-id is already fresh, so a drop
+	// failure can't strand the system id-less — best-effort.
+	if err := dropStaleDBusMachineID(dbusMachineIDPath); err != nil {
+		log.WithFunc("agent.regenMachineID").Debugf(ctx, "drop stale dbus machine id: %v", err)
 	}
-	return writeRandomMachineID()
+	return nil
 }
 
-// dropStaleDBusMachineID removes a baked regular-file D-Bus copy that
-// systemd-machine-id-setup would re-adopt; a symlink or missing file is left
-// alone, and any other lstat error is surfaced so regen fails loudly.
+// dropStaleDBusMachineID removes a baked regular-file D-Bus copy that would
+// otherwise pin the old id; a symlink or missing file already tracks
+// /etc/machine-id and is left alone.
 func dropStaleDBusMachineID(path string) error {
 	fi, err := os.Lstat(path)
 	if err != nil {
@@ -150,16 +151,24 @@ func dropStaleDBusMachineID(path string) error {
 	return nil
 }
 
-// writeRandomMachineID is the fallback when systemd-machine-id-setup is
-// unavailable: a fresh random id, matching /etc/machine-id's own format.
+// writeRandomMachineID overwrites /etc/machine-id with a fresh random id.
 func writeRandomMachineID() error {
-	buf := make([]byte, machineIDBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return fmt.Errorf("generate machine id: %w", err)
+	id, err := randomMachineID()
+	if err != nil {
+		return err
 	}
-	line := hex.EncodeToString(buf) + "\n"
-	if err := os.WriteFile(machineIDPath, []byte(line), 0o444); err != nil { //nolint:gosec // matches /etc/machine-id's own world-readable convention
+	if err := os.WriteFile(machineIDPath, []byte(id), 0o444); err != nil { //nolint:gosec // matches /etc/machine-id's own world-readable convention
 		return fmt.Errorf("write %s: %w", machineIDPath, err)
 	}
 	return nil
+}
+
+// randomMachineID returns a fresh id in /etc/machine-id's canonical
+// 32-hex-lowercase + newline format.
+func randomMachineID() (string, error) {
+	buf := make([]byte, machineIDBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate machine id: %w", err)
+	}
+	return hex.EncodeToString(buf) + "\n", nil
 }

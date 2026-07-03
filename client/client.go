@@ -112,7 +112,8 @@ readLoop:
 
 // Reseed sends host-fed entropy and a reseed order after a VM clone/restore,
 // so N clones sharing byte-identical snapshot memory don't share
-// byte-identical CRNG state. nil iff the agent reports exit code 0.
+// byte-identical CRNG state. Entropy beyond 512 bytes is capped by the agent.
+// nil iff the agent reports exit code 0.
 func Reseed(ctx context.Context, conn io.ReadWriteCloser, entropy []byte, regenMachineID bool) error {
 	_, dec, cancel, err := openSession(ctx, conn, agent.Message{Type: agent.MsgReseed, Data: entropy, RegenMachineID: regenMachineID})
 	if err != nil {
