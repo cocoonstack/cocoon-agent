@@ -118,10 +118,10 @@ func regenMachineID(ctx context.Context) error {
 		return fmt.Errorf("truncate %s: %w", machineIDPath, err)
 	}
 	if path, err := exec.LookPath("systemd-machine-id-setup"); err == nil {
-		if err := exec.CommandContext(ctx, path).Run(); err != nil { //nolint:gosec // path resolved by LookPath for a fixed binary name, not user input
-			return fmt.Errorf("run systemd-machine-id-setup: %w", err)
+		if err := exec.CommandContext(ctx, path).Run(); err == nil { //nolint:gosec // path resolved by LookPath for a fixed binary name, not user input
+			return nil
 		}
-		return nil
+		// Fall through: a failed setup must not leave the truncated file empty.
 	}
 	return writeRandomMachineID()
 }
