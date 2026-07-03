@@ -9,7 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// execWaitDelay bounds how long Wait blocks on the child's stdout/stderr
+// pipes after exit: a daemonized grandchild inherits them and would pin
+// the session (and its conn) until it dies.
+const execWaitDelay = 2 * time.Second
 
 // processController hooks platform-specific child-lifecycle steps into
 // runExec: AfterStart runs once cmd.Process exists (Windows assigns the
@@ -46,6 +52,7 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // argv from trusted vsock peer
+	cmd.WaitDelay = execWaitDelay
 	procCtl, err := setupProcess(cmd)
 	if err != nil {
 		return enc.SendErrorf("exec: setup process %s: %v", argv[0], err)
@@ -115,6 +122,9 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	case waitErr == nil:
 	case errors.As(waitErr, &exitErr):
 		exitCode = exitErr.ExitCode()
+	case errors.Is(waitErr, exec.ErrWaitDelay):
+		// Pipes were abandoned to a background child; the command itself exited.
+		exitCode = cmd.ProcessState.ExitCode()
 	default:
 		return enc.SendErrorf("exec: wait %s: %v", argv[0], waitErr)
 	}
