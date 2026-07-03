@@ -44,6 +44,28 @@ func TestServerExecHelloWorld(t *testing.T) {
 	}
 }
 
+func TestServerExecBackgroundChildDoesNotPinSession(t *testing.T) {
+	t.Parallel()
+	ctx, conn := dialTestServer(t)
+
+	var stdout bytes.Buffer
+	start := time.Now()
+	exit, err := client.Run(ctx, conn, []string{"sh", "-c", "sleep 6 & echo started"}, nil, nil, &stdout, io.Discard)
+	if err != nil {
+		t.Fatalf("client run: %v", err)
+	}
+	if exit != 0 {
+		t.Errorf("exit = %d, want 0", exit)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "started" {
+		t.Errorf("stdout = %q, want \"started\"", got)
+	}
+	// Without WaitDelay the session is pinned until the background sleep exits.
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Errorf("session took %v, want < 4s (pinned by background child)", elapsed)
+	}
+}
+
 func TestServerPropagatesNonZeroExit(t *testing.T) {
 	t.Parallel()
 	ctx, conn := dialTestServer(t)
