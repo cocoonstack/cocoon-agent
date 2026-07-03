@@ -92,8 +92,15 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		}
 		return
 	}
-	if first.Type != MsgExec {
-		if err := enc.SendErrorf("expected first frame type %q, got %q", MsgExec, first.Type); err != nil {
+	switch first.Type {
+	case MsgExec: // exec session continues below the switch
+	case MsgReseed:
+		if err := runReseed(ctx, first, enc); err != nil {
+			logger.Warnf(ctx, "reseed session ended: %v", err)
+		}
+		return
+	default:
+		if err := enc.SendErrorf("expected first frame type %q or %q, got %q", MsgExec, MsgReseed, first.Type); err != nil {
 			logger.Warnf(ctx, "send rejection error frame to %s: %v", conn.RemoteAddr(), err)
 		}
 		return

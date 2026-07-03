@@ -118,6 +118,58 @@ func TestServerRejectsNonExecFirstFrame(t *testing.T) {
 	}
 }
 
+// TestServerDispatchesReseedFirstFrame guards the handleConn dispatch: a
+// MsgReseed first frame must reach runReseed rather than the unknown-type
+// rejection path. On non-Linux dev builds runReseed is the reseed_other
+// stub, so a MsgError is the correct terminal frame here.
+func TestServerDispatchesReseedFirstFrame(t *testing.T) {
+	t.Parallel()
+	_, conn := dialTestServer(t)
+
+	enc := agent.NewEncoder(conn)
+	if err := enc.Encode(agent.Message{Type: agent.MsgReseed, Data: []byte("host-entropy"), RegenMachineID: true}); err != nil {
+		t.Fatalf("encode reseed: %v", err)
+	}
+
+	dec := agent.NewDecoder(conn)
+	frame, err := dec.Decode()
+	if err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if runtime.GOOS != "linux" {
+		if frame.Type != agent.MsgError {
+			t.Fatalf("expected MsgError on %s (reseed unsupported), got %#v", runtime.GOOS, frame)
+		}
+		if !strings.Contains(frame.Message, "not supported") {
+			t.Errorf("expected unsupported-OS message, got %q", frame.Message)
+		}
+		return
+	}
+	if frame.Type != agent.MsgExit && frame.Type != agent.MsgError {
+		t.Fatalf("expected terminal frame on linux, got %#v", frame)
+	}
+}
+
+// TestServerRejectsUnknownFirstFrameType guards the dispatch default branch:
+// a type that is neither MsgExec nor MsgReseed must still be rejected.
+func TestServerRejectsUnknownFirstFrameType(t *testing.T) {
+	t.Parallel()
+	_, conn := dialTestServer(t)
+
+	enc := agent.NewEncoder(conn)
+	if err := enc.Encode(agent.Message{Type: "bogus"}); err != nil {
+		t.Fatalf("encode bogus first frame: %v", err)
+	}
+	dec := agent.NewDecoder(conn)
+	frame, err := dec.Decode()
+	if err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if frame.Type != agent.MsgError {
+		t.Errorf("expected error frame, got %#v", frame)
+	}
+}
+
 func TestServerNonexistentCommand(t *testing.T) {
 	t.Parallel()
 	ctx, conn := dialTestServer(t)
