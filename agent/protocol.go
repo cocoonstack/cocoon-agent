@@ -18,6 +18,7 @@ import (
 // both as session-closed; MsgError is never followed by MsgExit.
 const (
 	MsgExec       = "exec"
+	MsgReseed     = "reseed"
 	MsgStdin      = "stdin"
 	MsgStdinClose = "stdin_close"
 
@@ -36,13 +37,14 @@ var errTerminalFrameSent = errors.New("terminal frame already sent")
 
 // Message is the union of all frames. Only fields relevant to Type are populated.
 type Message struct {
-	Type     string            `json:"type"`
-	Argv     []string          `json:"argv,omitempty"`
-	Env      map[string]string `json:"env,omitempty"`
-	Data     []byte            `json:"data,omitempty"`
-	PID      int               `json:"pid,omitempty"`
-	ExitCode int               `json:"exit_code,omitempty"`
-	Message  string            `json:"message,omitempty"`
+	Type           string            `json:"type"`
+	Argv           []string          `json:"argv,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	Data           []byte            `json:"data,omitempty"`
+	PID            int               `json:"pid,omitempty"`
+	ExitCode       int               `json:"exit_code,omitempty"`
+	Message        string            `json:"message,omitempty"`
+	RegenMachineID bool              `json:"regen_machine_id,omitempty"`
 }
 
 // Decoder reads line-delimited JSON frames off a reader.

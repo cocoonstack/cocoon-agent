@@ -36,6 +36,14 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 			msg:  Message{Type: MsgExit, ExitCode: 42},
 		},
 		{
+			name: "reseed with entropy and regen_machine_id",
+			msg: Message{
+				Type:           MsgReseed,
+				Data:           []byte{0xde, 0xad, 0xbe, 0xef},
+				RegenMachineID: true,
+			},
+		},
+		{
 			name: "error",
 			msg:  Message{Type: MsgError, Message: "kaboom"},
 		},
