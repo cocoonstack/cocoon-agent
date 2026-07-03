@@ -24,6 +24,7 @@ const (
 	urandomPath       = "/dev/urandom"
 	systemdRandomSeed = "/var/lib/systemd/random-seed"
 	machineIDPath     = "/etc/machine-id"
+	dbusMachineIDPath = "/var/lib/dbus/machine-id"
 )
 
 // runReseed injects host-fed entropy and forces a CRNG reseed so clones don't
@@ -117,6 +118,9 @@ func regenMachineID(ctx context.Context) error {
 	if err := os.Truncate(machineIDPath, 0); err != nil {
 		return fmt.Errorf("truncate %s: %w", machineIDPath, err)
 	}
+	if err := dropStaleDBusMachineID(dbusMachineIDPath); err != nil {
+		return err
+	}
 	if path, err := exec.LookPath("systemd-machine-id-setup"); err == nil {
 		if err := exec.CommandContext(ctx, path).Run(); err == nil { //nolint:gosec // path resolved by LookPath for a fixed binary name, not user input
 			return nil
@@ -124,6 +128,26 @@ func regenMachineID(ctx context.Context) error {
 		// Fall through: a failed setup must not leave the truncated file empty.
 	}
 	return writeRandomMachineID()
+}
+
+// dropStaleDBusMachineID removes a baked regular-file D-Bus copy that
+// systemd-machine-id-setup would re-adopt; a symlink or missing file is left
+// alone, and any other lstat error is surfaced so regen fails loudly.
+func dropStaleDBusMachineID(path string) error {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("lstat %s: %w", path, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
+	return nil
 }
 
 // writeRandomMachineID is the fallback when systemd-machine-id-setup is
