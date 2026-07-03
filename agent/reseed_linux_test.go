@@ -7,8 +7,30 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 )
+
+// machineIDRe matches /etc/machine-id's canonical 32-hex-lowercase + newline form.
+var machineIDRe = regexp.MustCompile(`^[0-9a-f]{32}\n$`)
+
+func TestRandomMachineID(t *testing.T) {
+	a, err := randomMachineID()
+	if err != nil {
+		t.Fatalf("randomMachineID: %v", err)
+	}
+	if !machineIDRe.MatchString(a) {
+		t.Errorf("id %q not canonical 32-hex+newline", a)
+	}
+	// Uniqueness is the whole point: a snapshot clone must not reproduce it.
+	b, err := randomMachineID()
+	if err != nil {
+		t.Fatalf("randomMachineID: %v", err)
+	}
+	if a == b {
+		t.Error("two random machine ids are identical")
+	}
+}
 
 func TestDropStaleDBusMachineID(t *testing.T) {
 	t.Run("regular file is removed", func(t *testing.T) {
