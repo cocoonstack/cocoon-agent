@@ -41,7 +41,7 @@ func newServeCmd() *cobra.Command {
 // listenVsockWithRetry rides out the viosock PnP-bind window on Windows boot
 // and snap/restore — Linux normally succeeds first try.
 func listenVsockWithRetry(ctx context.Context, port uint32) (net.Listener, error) {
-	logger := log.WithFunc("cmd.serve.listenRetry")
+	logger := log.WithFunc("cmd.listenVsockWithRetry")
 	deadline := time.Now().Add(listenRetryTimeout)
 	for attempt := 1; ; attempt++ {
 		lsn, err := listenVsock(ctx, port)
