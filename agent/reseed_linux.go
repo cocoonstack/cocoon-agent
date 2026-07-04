@@ -123,10 +123,10 @@ func regenMachineID(ctx context.Context) error {
 	if err := writeRandomMachineID(); err != nil {
 		return err
 	}
-	// The D-Bus copy is secondary; /etc/machine-id is already fresh, so a drop
-	// failure can't strand the system id-less — best-effort.
+	// Best-effort: /etc/machine-id is already fresh, but a surviving D-Bus copy
+	// keeps serving the old id to dbus consumers — worth a warning.
 	if err := dropStaleDBusMachineID(dbusMachineIDPath); err != nil {
-		log.WithFunc("agent.regenMachineID").Debugf(ctx, "drop stale dbus machine id: %v", err)
+		log.WithFunc("agent.regenMachineID").Warnf(ctx, "drop stale dbus machine id: %v", err)
 	}
 	return nil
 }
