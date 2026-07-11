@@ -35,8 +35,6 @@ func NewServer(listener net.Listener) *Server {
 }
 
 // Serve accepts until ctx is canceled or the listener errors permanently.
-// Shutdown closes both the listener and every in-flight conn so a slow
-// peer can't pin framedWriter.Write and stall connWG.Wait.
 func (s *Server) Serve(ctx context.Context) error {
 	logger := log.WithFunc("agent.Server.Serve")
 	logger.Infof(ctx, "agent listening on %s", s.listener.Addr())

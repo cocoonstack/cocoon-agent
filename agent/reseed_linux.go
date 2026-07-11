@@ -151,7 +151,6 @@ func dropStaleDBusMachineID(path string) error {
 	return nil
 }
 
-// writeRandomMachineID overwrites /etc/machine-id with a fresh random id.
 func writeRandomMachineID() error {
 	id, err := randomMachineID()
 	if err != nil {
