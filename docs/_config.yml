@@ -1,0 +1,3 @@
+title: cocoon-agent
+description: In-guest vsock agent for cocoon VMs (exec, logs, entropy reseed)
+theme: jekyll-theme-primer
