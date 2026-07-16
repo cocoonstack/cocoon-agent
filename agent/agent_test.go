@@ -313,9 +313,57 @@ func TestServerMergesEnvCallerWins(t *testing.T) {
 	}
 }
 
+func TestServerShutdownClosesIdleConn(t *testing.T) {
+	tests := []struct {
+		name     string
+		shutdown func(*agent.Server, context.CancelFunc)
+	}{
+		{
+			name: "context cancel",
+			shutdown: func(_ *agent.Server, cancel context.CancelFunc) {
+				cancel()
+			},
+		},
+		{
+			name: "server close",
+			shutdown: func(srv *agent.Server, _ context.CancelFunc) {
+				_ = srv.Close()
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tcp, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("listen: %v", err)
+			}
+			srv := agent.NewServer(tcp)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			errCh := make(chan error, 1)
+			go func() { errCh <- srv.Serve(ctx) }()
+
+			// A conn that connects but never sends: its handler parks in Decode, so
+			// Serve can only return if shutdown force-closes the tracked conn.
+			conn, err := net.Dial("tcp", tcp.Addr().String())
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			defer conn.Close() //nolint:errcheck
+
+			tt.shutdown(srv, cancel)
+			select {
+			case <-errCh:
+			case <-time.After(3 * time.Second):
+				t.Fatalf("Serve did not return after shutdown with an idle conn:\n%s", goroutineDump())
+			}
+		})
+	}
+}
+
 // TestServerWatcherExitsOnPermanentAcceptError: on a non-ErrClosed Accept
-// failure, Serve must reap the ctx watcher via the done channel rather than
-// leak it until the (possibly never-canceled) parent ctx fires.
+// failure, Serve must release its shutdown watcher rather than leak it until
+// the (possibly never-canceled) parent ctx fires.
 //
 // Not parallel: asserts against the specific Serve watcher goroutine and keeps
 // other tests from creating extra matching stacks while it samples.
@@ -323,7 +371,7 @@ func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 	before := countGoroutines(serveWatcherFrame)
 
 	srv := agent.NewServer(&errorAcceptListener{err: errors.New("synthetic permanent accept failure")})
-	// Long-lived ctx so only the done-channel path can release the watcher.
+	// Long-lived ctx so only Serve's own return path can release the watcher.
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -339,8 +387,8 @@ func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 		t.Fatal("Serve did not return after permanent accept error")
 	}
 
-	// Watcher exits async after close(done); poll until the specific watcher
-	// stack count returns to baseline.
+	// Watcher release is async; poll until the specific watcher stack count
+	// returns to baseline.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if countGoroutines(serveWatcherFrame) <= before {
@@ -407,13 +455,11 @@ func dialTestServer(t *testing.T) (context.Context, net.Conn) {
 	conn, err := net.Dial("tcp", tcp.Addr().String())
 	if err != nil {
 		cancel()
-		_ = srv.Close()
 		wg.Wait()
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() {
 		cancel()
-		_ = srv.Close()
 		wg.Wait()
 		_ = conn.Close()
 	})

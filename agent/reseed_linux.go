@@ -83,9 +83,7 @@ func reseedURandom(data []byte) error {
 // x/sys/unix exports no rand_pool_info helper, so the ioctl buffer
 // (entropy_count bits, buf_size bytes, then the payload) is built by hand.
 func addEntropy(fd int, data []byte) error {
-	if len(data) > maxReseedEntropyBytes {
-		data = data[:maxReseedEntropyBytes]
-	}
+	data = data[:min(len(data), maxReseedEntropyBytes)]
 	entropyBits := uint32(len(data)) * 8 //nolint:gosec // len(data) capped at maxReseedEntropyBytes above
 	bufSize := uint32(len(data))         //nolint:gosec // len(data) capped at maxReseedEntropyBytes above
 

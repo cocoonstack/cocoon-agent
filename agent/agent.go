@@ -22,8 +22,9 @@ const (
 type Server struct {
 	listener net.Listener
 
-	mu    sync.Mutex
-	conns map[net.Conn]struct{}
+	mu     sync.Mutex
+	conns  map[net.Conn]struct{}
+	closed bool
 }
 
 // NewServer wraps listener so callers can drive Serve / Close.
@@ -39,16 +40,8 @@ func (s *Server) Serve(ctx context.Context) error {
 	logger := log.WithFunc("agent.Server.Serve")
 	logger.Infof(ctx, "agent listening on %s", s.listener.Addr())
 
-	// done reaps the watcher on every return path, not just ctx-cancel.
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = s.shutdown()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, func() { _ = s.shutdown() })
+	defer stop()
 
 	var connWG sync.WaitGroup
 	for {
@@ -64,19 +57,20 @@ func (s *Server) Serve(ctx context.Context) error {
 			connWG.Wait()
 			return fmt.Errorf("accept: %w", err)
 		}
+		if !s.trackConn(conn) {
+			_ = conn.Close()
+			continue
+		}
 		connWG.Go(func() { s.handleConn(ctx, conn) })
 	}
 }
 
-// Close stops the accept loop and tears down every in-flight session,
-// mirroring ctx-cancel so it can't hang on slow peers.
 func (s *Server) Close() error {
 	return s.shutdown()
 }
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	logger := log.WithFunc("agent.Server.handleConn")
-	s.trackConn(conn)
 	defer s.untrackConn(conn)
 	defer conn.Close() //nolint:errcheck
 
@@ -146,10 +140,14 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	<-stdinDone
 }
 
-func (s *Server) trackConn(c net.Conn) {
+func (s *Server) trackConn(c net.Conn) bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
 	s.conns[c] = struct{}{}
-	s.mu.Unlock()
+	return true
 }
 
 func (s *Server) untrackConn(c net.Conn) {
@@ -161,6 +159,7 @@ func (s *Server) untrackConn(c net.Conn) {
 func (s *Server) closeAllConns() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.closed = true
 	for c := range s.conns {
 		_ = c.Close()
 	}

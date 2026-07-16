@@ -4,17 +4,12 @@ package agent
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
-
-// maxWindowsProcessID bounds the int → uint32 cast in assign; out-of-range
-// implies a corrupt cmd.Process, refuse rather than truncate.
-const maxWindowsProcessID = int64(^uint32(0))
 
 // windowsProcessController owns the Job Object that backs one runExec
 // session. cmd.Cancel and processController.close both fire close():
@@ -26,14 +21,7 @@ type windowsProcessController struct {
 }
 
 func (c *windowsProcessController) assign(cmd *exec.Cmd) error {
-	if cmd.Process == nil {
-		return os.ErrProcessDone
-	}
-	pid64 := int64(cmd.Process.Pid)
-	if pid64 <= 0 || pid64 > maxWindowsProcessID {
-		return fmt.Errorf("process id %d is outside uint32 range", cmd.Process.Pid)
-	}
-	pid := uint32(pid64) //nolint:gosec // bounds checked just above
+	pid := uint32(cmd.Process.Pid) //nolint:gosec // the OS hands out PIDs as DWORDs; the int round-trip can't overflow
 	proc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, pid)
 	if err != nil {
 		return fmt.Errorf("open process: %w", err)

@@ -151,10 +151,7 @@ func Reseed(ctx context.Context, conn io.ReadWriteCloser, entropy []byte, regenM
 func openSession(ctx context.Context, conn io.ReadWriteCloser, first agent.Message) (*agent.Encoder, *agent.Decoder, context.CancelFunc, error) {
 	// Sub-ctx so the conn-closer doesn't outlive the session on a longer-lived caller ctx.
 	sessCtx, cancel := context.WithCancel(ctx)
-	go func() {
-		<-sessCtx.Done()
-		_ = conn.Close()
-	}()
+	context.AfterFunc(sessCtx, func() { _ = conn.Close() })
 	enc := agent.NewEncoder(conn)
 	if err := enc.Encode(first); err != nil {
 		cancel()
