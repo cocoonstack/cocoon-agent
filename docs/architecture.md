@@ -30,7 +30,11 @@ host (cocoon node)                                  guest VM
 +------------------+                            +------------------------+
 ```
 
-The wire protocol is line-delimited JSON, one frame per line, both directions. The first frame is `MsgExec` carrying argv; subsequent frames are stdin chunks (`MsgStdin` / `MsgStdinClose`) from the client and stdout/stderr chunks plus the final exit code (`MsgStdout` / `MsgStderr` / `MsgExit`) from the agent.
+The wire protocol is line-delimited JSON, one frame per line, both directions, across nine frame types. The first frame is either `MsgExec` (carrying argv) or `MsgReseed` (host-fed entropy, see below), selecting the session kind.
+
+- **Exec session** — client sends stdin chunks (`MsgStdin` / `MsgStdinClose`); the agent replies `MsgStarted` (child PID), streams `MsgStdout` / `MsgStderr`, and ends with `MsgExit` (exit code).
+- **Reseed session** — client sends `MsgReseed`; the agent injects the entropy into the guest CRNG, optionally regenerates `/etc/machine-id`, and replies `MsgStarted` then a terminal frame.
+- **Errors** — any protocol failure ends the session with `MsgError`.
 
 See [`agent/protocol.go`](../agent/protocol.go) for the complete schema.
 
@@ -39,6 +43,7 @@ See [`agent/protocol.go`](../agent/protocol.go) for the complete schema.
 | Milestone | Status | Scope |
 |---|---|---|
 | MVP | v0.1.0 | exec, stdin streaming, stdout/stderr, exit code; vsock listener; cobra CLI (Linux) |
-| Windows guests | v0.1.1+ (current) | AF_VSOCK via viosock; SCM-registered Windows service; PowerShell installer |
-| PTY mode | planned | `tty: true`, window resize, signal forwarding — interactive shells, `vim`/`top` |
+| Windows guests | v0.1.1 | AF_VSOCK via viosock; SCM-registered Windows service; PowerShell installer |
+| Reseed on clone/restore | v0.1.6 | host-fed entropy → guest CRNG reseed + `/etc/machine-id` regen, so clones don't stay correlated (`client.Reseed`) |
+| PTY mode | planned (v0.3) | `tty: true`, window resize, signal forwarding — interactive shells, `vim`/`top` |
 | Streaming host adapter | planned | subprocess-friendly hand-off into vk-cocoon `RunInContainer` |

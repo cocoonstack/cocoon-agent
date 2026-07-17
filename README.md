@@ -1,6 +1,8 @@
 # cocoon-agent
 
-In-VM exec agent for [Cocoon](https://github.com/cocoonstack/cocoon)-managed VMs. Listens on virtio-vsock and runs commands on behalf of host-side callers (vk-cocoon, the cocoon CLI, anything else with vsock access on the same node), replacing SSH for control-plane operations like `kubectl exec`.
+In-VM exec agent for [Cocoon](https://github.com/cocoonstack/cocoon)-managed VMs. Listens on virtio-vsock and runs commands on behalf of host-side callers (vk-cocoon, the cocoon CLI, anything else with vsock access on the same node), replacing SSH for control-plane operations like `kubectl exec`. It also handles post-clone **reseed** — injecting host entropy into the guest CRNG and regenerating `/etc/machine-id` so cloned VMs don't stay correlated.
+
+**Documentation: [cocoonstack.github.io/cocoon-agent](https://cocoonstack.github.io/cocoon-agent/)** (source in [`docs/`](docs/)).
 
 ```
 host (cocoon node)                                  guest VM
