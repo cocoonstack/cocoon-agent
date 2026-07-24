@@ -30,7 +30,7 @@ func newServeCmd() *cobra.Command {
 				return fmt.Errorf("listen vsock port %d: %w", port, err)
 			}
 			srv := agent.NewServer(listener)
-			log.WithFunc("cmd.serve").Infof(ctx, "cocoon-agent serving vsock port %d", port)
+			log.WithFunc("cmd.newServeCmd").Infof(ctx, "cocoon-agent serving vsock port %d", port)
 			return srv.Serve(ctx)
 		},
 	}

@@ -34,10 +34,7 @@ func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
 
 var _ net.Listener = (*hostOnlyListener)(nil)
 
-// hostOnlyListener rejects any peer whose CID is not VMADDR_CID_HOST.
-// Without this, a guest-local unprivileged process could connect via
-// VMADDR_CID_LOCAL (loopback, when the kernel has CONFIG_VSOCKETS_LOOPBACK)
-// and trigger root-level command execution.
+// Peers other than VMADDR_CID_HOST are rejected: VMADDR_CID_LOCAL loopback would let an unprivileged guest process run commands as root.
 type hostOnlyListener struct {
 	net.Listener
 	// ctx is the serve ctx, stashed for Accept-loop diagnostic logging.

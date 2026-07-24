@@ -11,8 +11,6 @@ import (
 	"github.com/mdlayher/vsock"
 )
 
-// Only vsock.Addr with ContextID == vsock.Host is accepted; guest-local
-// CIDs and non-vsock addrs must be rejected.
 func TestIsHostPeer(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -46,8 +44,6 @@ func TestIsHostPeer(t *testing.T) {
 	}
 }
 
-// staticAddrConn is a net.Conn stub whose RemoteAddr returns a fixed addr;
-// only RemoteAddr is exercised by the host-only filter.
 type staticAddrConn struct {
 	addr net.Addr
 }

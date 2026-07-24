@@ -14,9 +14,7 @@ const serviceName = "cocoon-agent"
 
 type winService struct{}
 
-// Execute is the SCM-dispatched handler. It launches the normal cobra command
-// flow under a cancellable context and translates SCM stop/shutdown into ctx
-// cancel, mirroring the SIGTERM path on POSIX.
+// SCM stop/shutdown maps to ctx cancel, mirroring the SIGTERM path on POSIX.
 func (s *winService) Execute(_ []string, r <-chan svc.ChangeRequest, status chan<- svc.Status) (ssec bool, errno uint32) {
 	status <- svc.Status{State: svc.StartPending}
 
@@ -55,9 +53,7 @@ func (s *winService) Execute(_ []string, r <-chan svc.ChangeRequest, status chan
 	}
 }
 
-// runAsWindowsService dispatches to SCM if started by it. Returns (true, err)
-// when service mode took over (caller must return without further work);
-// (false, nil) when running interactively.
+// A true result means SCM mode took over and the caller must return without further work.
 func runAsWindowsService() (bool, error) {
 	isService, err := svc.IsWindowsService()
 	if err != nil {

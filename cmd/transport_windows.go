@@ -1,13 +1,7 @@
 //go:build windows
 
-// Windows transport for cocoon-agent: AF_VSOCK over the viosock Winsock
-// provider that ships with virtio-win >= 0.1.285. The address family
-// number (40) and sockaddr_vm layout match Linux's AF_VSOCK 1:1, so the
-// wire-level protocol cocoon-agent speaks is identical on both guests.
-//
-// We bypass golang.org/x/sys/windows.Bind (its Sockaddr interface has an
-// unexported method, so we can't add AF_VSOCK from outside the package)
-// and call the ws2_32.dll procs directly with a sockaddr_vm pointer.
+// AF_VSOCK on Windows comes from the viosock Winsock provider shipped with virtio-win >= 0.1.285.
+// x/sys/windows.Bind cannot carry AF_VSOCK (unexported method on its Sockaddr interface), so the ws2_32.dll procs are called directly.
 
 package cmd
 
@@ -49,9 +43,7 @@ var (
 	procSend       = modws2_32.NewProc("send")
 	procWSAStartup = modws2_32.NewProc("WSAStartup")
 
-	// LazyProc.Call returns GetLastError as its third value, captured by
-	// the Go runtime on the same OS thread before the goroutine can be
-	// rescheduled — so we never need a separate WSAGetLastError dance.
+	// LazyProc.Call returns GetLastError as its third value, captured on the same OS thread, so no WSAGetLastError dance is needed.
 	wsaInit = sync.OnceValue(func() error {
 		var d windows.WSAData
 		// 0x0202 = MAKEWORD(2,2); WSAStartup returns 0 on success.
@@ -65,8 +57,7 @@ var (
 	errDeadlineUnsupported = errors.New("vsock: deadline unsupported on windows")
 )
 
-// sockaddrVM matches `struct sockaddr_vm` exactly (16 bytes). Field order
-// and padding are load-bearing — the kernel/driver reads these offsets.
+// Field order and padding match `struct sockaddr_vm` (16 bytes) exactly — the driver reads these offsets.
 type sockaddrVM struct {
 	Family    uint16
 	Reserved1 uint16
@@ -76,8 +67,6 @@ type sockaddrVM struct {
 	_         [3]uint8
 }
 
-// newVsockSocket lazily initializes Winsock and opens an AF_VSOCK stream
-// socket shared by the listen and dial paths.
 func newVsockSocket() (windows.Handle, error) {
 	if err := wsaInit(); err != nil {
 		return 0, err
@@ -142,8 +131,6 @@ type vsockListener struct {
 	logger *log.Fields
 }
 
-// Accept blocks until a host-originated connection arrives. Connections from
-// non-host CIDs (guest-local processes via VMADDR_CID_LOCAL etc.) are dropped.
 func (l *vsockListener) Accept() (net.Conn, error) {
 	for {
 		var sa sockaddrVM
@@ -245,9 +232,7 @@ func (c *vsockConn) RemoteAddr() net.Addr {
 	return &vsockAddr{cid: c.peerCID, port: c.peerPort}
 }
 
-// Deadlines are unsupported: agent shutdown uses Closesocket to unblock
-// recv/send, which is sufficient. Switch to overlapped I/O if real
-// per-call timeouts ever become a requirement.
+// Deadlines are unsupported: shutdown uses Closesocket to unblock recv/send, and overlapped I/O would be required for real per-call timeouts.
 func (c *vsockConn) SetDeadline(_ time.Time) error      { return errDeadlineUnsupported }
 func (c *vsockConn) SetReadDeadline(_ time.Time) error  { return errDeadlineUnsupported }
 func (c *vsockConn) SetWriteDeadline(_ time.Time) error { return errDeadlineUnsupported }

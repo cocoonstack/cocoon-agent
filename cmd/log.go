@@ -9,8 +9,7 @@ import (
 	"github.com/projecteru2/core/types"
 )
 
-// setupLog reads AGENT_LOG_LEVEL (default info). File logging is off —
-// systemd captures stdout/stderr to journald inside the VM.
+// File logging is off — systemd captures stdout/stderr to journald inside the VM.
 func setupLog(ctx context.Context) error {
 	level := cmp.Or(os.Getenv("AGENT_LOG_LEVEL"), "info")
 	return log.SetupLog(ctx, &types.ServerLogConfig{Level: level}, "")
