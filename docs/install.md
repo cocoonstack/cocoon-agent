@@ -1,5 +1,21 @@
 # Installation
 
+## Release artifacts
+
+Each release publishes, for linux `x86_64` and `arm64` and for windows
+`x86_64`:
+
+| Asset | Contents |
+|---|---|
+| `cocoon-agent_<version>_Linux_<arch>.tar.gz` | stripped `cocoon-agent` |
+| `cocoon-agent_<version>_Windows_x86_64.zip` | `cocoon-agent.exe` plus `install-cocoon-agent.ps1` |
+| `cocoon-agent_<version>_Linux_<arch>_debug.tar.gz` | unstripped `cocoon-agent.dbg`, for symbol-backed debugging on that node |
+
+Unversioned aliases (`cocoon-agent_Linux_x86_64.tar.gz`,
+`cocoon-agent_Windows_x86_64.zip`, …) resolve under
+`releases/latest/download/`, so image builds can pin "latest" without
+templating a version.
+
 ## Linux guest
 
 cocoon-agent is baked into Cocoon-managed images alongside the existing OCI bundles in [cocoon/os-image](https://github.com/cocoonstack/cocoon/tree/master/os-image):
