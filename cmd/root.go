@@ -55,8 +55,7 @@ func run() int {
 	}
 
 	if err := NewRootCmd().ExecuteContext(ctx); err != nil {
-		var ec *exitCodeError
-		if errors.As(err, &ec) {
+		if ec, ok := errors.AsType[*exitCodeError](err); ok {
 			return ec.code
 		}
 		log.WithFunc("cmd.run").Error(ctx, err, "command failed")
