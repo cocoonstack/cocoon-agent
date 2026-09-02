@@ -33,7 +33,7 @@ host (cocoon node)                                  guest VM
 The wire protocol is line-delimited JSON, one frame per line, both directions, across nine frame types. The first frame is either `MsgExec` (carrying argv) or `MsgReseed` (host-fed entropy, see below), selecting the session kind.
 
 - **Exec session** — client sends stdin chunks (`MsgStdin` / `MsgStdinClose`); the agent replies `MsgStarted` (child PID), streams `MsgStdout` / `MsgStderr`, and ends with `MsgExit` (exit code).
-- **Reseed session** — client sends `MsgReseed`; the agent injects the entropy into the guest CRNG, optionally regenerates `/etc/machine-id`, and replies `MsgStarted` then a terminal frame.
+- **Reseed session** — client sends `MsgReseed`; the agent injects the entropy into the guest CRNG, optionally regenerates `/etc/machine-id`, and replies with a terminal frame (`MsgExit` on success, `MsgError` otherwise).
 - **Errors** — any protocol failure ends the session with `MsgError`.
 
 See [`agent/protocol.go`](../agent/protocol.go) for the complete schema.
