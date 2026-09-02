@@ -30,7 +30,8 @@ const (
 	vmAddrCidAny  = 0xFFFFFFFF
 
 	sockaddrVMSize = int32(unsafe.Sizeof(sockaddrVM{}))
-	socketError    = ^uintptr(0) // winsock SOCKET_ERROR
+	socketError    = uintptr(^uint32(0)) // winsock SOCKET_ERROR is a 32-bit int; INVALID_SOCKET is pointer-width
+	invalidSocket  = ^uintptr(0)
 )
 
 var (
@@ -136,7 +137,7 @@ func (l *vsockListener) Accept() (net.Conn, error) {
 		var sa sockaddrVM
 		salen := sockaddrVMSize
 		r, _, callErr := procAccept.Call(uintptr(l.h), uintptr(unsafe.Pointer(&sa)), uintptr(unsafe.Pointer(&salen))) //nolint:gosec // winsock accept requires raw pointers
-		if r == socketError {
+		if r == invalidSocket {
 			if l.closed.Load() {
 				return nil, net.ErrClosed
 			}
