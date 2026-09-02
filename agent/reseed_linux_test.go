@@ -11,7 +11,6 @@ import (
 	"testing"
 )
 
-// machineIDRe matches /etc/machine-id's canonical 32-hex-lowercase + newline form.
 var machineIDRe = regexp.MustCompile(`^[0-9a-f]{32}\n$`)
 
 func TestRandomMachineID(t *testing.T) {
@@ -22,7 +21,6 @@ func TestRandomMachineID(t *testing.T) {
 	if !machineIDRe.MatchString(a) {
 		t.Errorf("id %q not canonical 32-hex+newline", a)
 	}
-	// Uniqueness is the whole point: a snapshot clone must not reproduce it.
 	b, err := randomMachineID()
 	if err != nil {
 		t.Fatalf("randomMachineID: %v", err)

@@ -60,7 +60,6 @@ func TestServerExecBackgroundChildDoesNotPinSession(t *testing.T) {
 	if got := strings.TrimSpace(stdout.String()); got != "started" {
 		t.Errorf("stdout = %q, want \"started\"", got)
 	}
-	// Without WaitDelay the session is pinned until the background sleep exits.
 	if elapsed := time.Since(start); elapsed > 4*time.Second {
 		t.Errorf("session took %v, want < 4s (pinned by background child)", elapsed)
 	}
@@ -96,8 +95,6 @@ func TestServerStreamsStdin(t *testing.T) {
 	}
 }
 
-// TestServerMsgStdinCloseTerminatesChildStdin: child must see EOF after the
-// close frame and exit 0; wc -c also confirms pre-close payload arrived.
 func TestServerMsgStdinCloseTerminatesChildStdin(t *testing.T) {
 	t.Parallel()
 	ctx, conn := dialTestServer(t)
@@ -140,10 +137,6 @@ func TestServerRejectsNonExecFirstFrame(t *testing.T) {
 	}
 }
 
-// TestServerDispatchesReseedFirstFrame guards the handleConn dispatch: a
-// MsgReseed first frame must reach runReseed rather than the unknown-type
-// rejection path. On non-Linux dev builds runReseed is the reseed_other
-// stub, so a MsgError is the correct terminal frame here.
 func TestServerDispatchesReseedFirstFrame(t *testing.T) {
 	t.Parallel()
 	_, conn := dialTestServer(t)
@@ -172,8 +165,6 @@ func TestServerDispatchesReseedFirstFrame(t *testing.T) {
 	}
 }
 
-// TestServerRejectsUnknownFirstFrameType guards the dispatch default branch:
-// a type that is neither MsgExec nor MsgReseed must still be rejected.
 func TestServerRejectsUnknownFirstFrameType(t *testing.T) {
 	t.Parallel()
 	_, conn := dialTestServer(t)
@@ -205,9 +196,6 @@ func TestServerNonexistentCommand(t *testing.T) {
 	}
 }
 
-// TestServerRejectsMalformedStdinFrame guards against the silent-EOF and
-// double-terminal regressions: a malformed mid-stream frame must surface as
-// MsgError and must not be followed by MsgExit.
 func TestServerRejectsMalformedStdinFrame(t *testing.T) {
 	t.Parallel()
 	_, conn := dialTestServer(t)
@@ -247,9 +235,6 @@ func TestServerRejectsMalformedStdinFrame(t *testing.T) {
 	}
 }
 
-// TestClientPropagatesStdinReadError guards against the local-IO-failure
-// regression: a non-EOF Read error must surface from Run, not be hidden
-// behind a successful exit code.
 func TestClientPropagatesStdinReadError(t *testing.T) {
 	t.Parallel()
 	ctx, conn := dialTestServer(t)
@@ -290,7 +275,6 @@ func TestServerMergesEnvWithHost(t *testing.T) {
 	}
 }
 
-// Not parallel: t.Setenv mutates process-global os.Environ.
 func TestServerMergesEnvCallerWins(t *testing.T) {
 	t.Setenv("COCOON_AGENT_OVERRIDE_VAR", "host-value")
 	ctx, conn := dialTestServer(t)
@@ -361,12 +345,6 @@ func TestServerShutdownClosesIdleConn(t *testing.T) {
 	}
 }
 
-// TestServerWatcherExitsOnPermanentAcceptError: on a non-ErrClosed Accept
-// failure, Serve must release its shutdown watcher rather than leak it until
-// the (possibly never-canceled) parent ctx fires.
-//
-// Not parallel: asserts against the specific Serve watcher goroutine and keeps
-// other tests from creating extra matching stacks while it samples.
 func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 	before := countGoroutines(serveWatcherFrame)
 
@@ -387,8 +365,6 @@ func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 		t.Fatal("Serve did not return after permanent accept error")
 	}
 
-	// Watcher release is async; poll until the specific watcher stack count
-	// returns to baseline.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if countGoroutines(serveWatcherFrame) <= before {
@@ -400,8 +376,6 @@ func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 	t.Fatalf("Serve watcher goroutine still present:\n%s", goroutineDump())
 }
 
-// A reader parked on a full stdinFrames send is only released by ctx cancel,
-// not conn.Close. Not parallel: samples the process-wide goroutine set.
 func TestServerDrainsStdinAfterEarlyChildExit(t *testing.T) {
 	before := countGoroutines(handleConnFrame)
 	_, conn := dialTestServer(t)
@@ -410,8 +384,6 @@ func TestServerDrainsStdinAfterEarlyChildExit(t *testing.T) {
 	if err := enc.Encode(agent.Message{Type: agent.MsgExec, Argv: []string{"sh", "-c", "exit 0"}}); err != nil {
 		t.Fatalf("encode exec: %v", err)
 	}
-	// Flood stdin so the server's frame reader fills stdinFrames while the
-	// exited child leaves the pump unable to drain it.
 	go func() {
 		chunk := make([]byte, 32*1024)
 		for enc.Encode(agent.Message{Type: agent.MsgStdin, Data: chunk}) == nil {
@@ -440,8 +412,6 @@ func TestServerDrainsStdinAfterEarlyChildExit(t *testing.T) {
 	t.Fatalf("handleConn goroutines leaked:\n%s", goroutineDump())
 }
 
-// dialTestServer runs the agent over loopback TCP and dials a client conn;
-// full teardown is registered via t.Cleanup so callers don't repeat it.
 func dialTestServer(t *testing.T) (context.Context, net.Conn) {
 	t.Helper()
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
@@ -481,8 +451,6 @@ func (r *erroringReader) Read(p []byte) (int, error) {
 	return 0, r.err
 }
 
-// errorAcceptListener returns err on every Accept — drives Serve's
-// permanent-error return path.
 type errorAcceptListener struct {
 	err error
 }

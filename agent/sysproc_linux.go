@@ -7,10 +7,7 @@ import (
 	"syscall"
 )
 
-// setupProcess puts the child in its own pgid and overrides
-// exec.CommandContext's default cancel (which only SIGKILLs the immediate
-// child) with a pgkill so background workers like `sh -c 'sleep 100 &'`
-// don't survive ctx cancellation as root-owned orphans.
+// setupProcess gives the child its own pgid and kills the whole group on cancel, so background workers do not outlive the session.
 func setupProcess(cmd *exec.Cmd) (processController, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {

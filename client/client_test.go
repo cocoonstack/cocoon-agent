@@ -39,7 +39,6 @@ func TestReseedNonZeroExit(t *testing.T) {
 	}
 }
 
-// reseedAgainstReply runs client.Reseed against a fake agent answering with reply; returns the frame the agent saw.
 func reseedAgainstReply(t *testing.T, entropy []byte, regenMachineID bool, reply agent.Message) (agent.Message, error) {
 	t.Helper()
 	clientConn, serverConn := net.Pipe()

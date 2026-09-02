@@ -14,7 +14,6 @@ const serviceName = "cocoon-agent"
 
 type winService struct{}
 
-// SCM stop/shutdown maps to ctx cancel, mirroring the SIGTERM path on POSIX.
 func (s *winService) Execute(_ []string, r <-chan svc.ChangeRequest, status chan<- svc.Status) (ssec bool, errno uint32) {
 	status <- svc.Status{State: svc.StartPending}
 

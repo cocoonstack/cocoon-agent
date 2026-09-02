@@ -138,8 +138,6 @@ func TestDecodeRejectsMalformedJSON(t *testing.T) {
 func TestDecodeHandlesLargeFrame(t *testing.T) {
 	t.Parallel()
 
-	// A 1 MiB stdout chunk should round-trip without exceeding the 8 MiB
-	// scanner cap.
 	payload := bytes.Repeat([]byte{'A'}, 1024*1024)
 	msg := Message{Type: MsgStdout, Data: payload}
 
@@ -156,8 +154,6 @@ func TestDecodeHandlesLargeFrame(t *testing.T) {
 	}
 }
 
-// Post-terminal Write must return errTerminalFrameSent without poisoning
-// lastErr or tripping cancel, else err()-join masks the real exit.
 func TestFramedWriterAfterTerminal(t *testing.T) {
 	t.Parallel()
 

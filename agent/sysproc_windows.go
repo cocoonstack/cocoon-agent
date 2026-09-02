@@ -11,13 +11,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// windowsProcessController owns the Job Object that backs one runExec
-// session. cmd.Cancel and processController.close both fire close():
-// Cancel covers ctx-cancel during cmd.Wait, Close (via runExec's defer)
-// covers the paths Cancel never reaches — normal exit, cmd.Start failure.
+// windowsProcessController owns the Job Object of one runExec session; cmd.Cancel and runExec's deferred close both release it.
 type windowsProcessController struct {
-	job  windows.Handle
-	once sync.Once
+	job   windows.Handle
+	close func()
 }
 
 func (c *windowsProcessController) assign(cmd *exec.Cmd) error {
@@ -39,15 +36,7 @@ func (c *windowsProcessController) cancel() error {
 	return nil
 }
 
-func (c *windowsProcessController) close() {
-	c.once.Do(func() {
-		_ = windows.CloseHandle(c.job)
-	})
-}
-
-// setupProcess creates a kill-on-close Job Object so the child's whole
-// process tree dies when the session ends — background workers spawned
-// by the child don't outlive runExec.
+// setupProcess creates a kill-on-close Job Object so the child's whole process tree dies with the session.
 func setupProcess(cmd *exec.Cmd) (processController, error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
@@ -66,7 +55,7 @@ func setupProcess(cmd *exec.Cmd) (processController, error) {
 		return processController{}, fmt.Errorf("set job object limits: %w", err)
 	}
 
-	ctl := &windowsProcessController{job: job}
+	ctl := &windowsProcessController{job: job, close: sync.OnceFunc(func() { _ = windows.CloseHandle(job) })}
 	cmd.Cancel = ctl.cancel
 
 	return processController{
