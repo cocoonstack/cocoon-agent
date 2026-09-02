@@ -79,9 +79,7 @@ func reseedURandom(data []byte) error {
 	return errors.Join(errs...)
 }
 
-// addEntropy injects data into the kernel entropy pool via RNDADDENTROPY.
-// x/sys/unix exports no rand_pool_info helper, so the ioctl buffer
-// (entropy_count bits, buf_size bytes, then the payload) is built by hand.
+// addEntropy builds the rand_pool_info ioctl buffer by hand: x/sys/unix exports no helper for it.
 func addEntropy(fd int, data []byte) error {
 	data = data[:min(len(data), maxReseedEntropyBytes)]
 	entropyBits := uint32(len(data)) * 8 //nolint:gosec // len(data) capped at maxReseedEntropyBytes above
@@ -106,11 +104,7 @@ func reseedCRNG(fd int) error {
 	return nil
 }
 
-// regenMachineID overwrites /etc/machine-id with a fresh random id so clones of
-// one snapshot don't share it. systemd-machine-id-setup is deliberately avoided:
-// in a VM it derives the id from the SMBIOS product_uuid, which a snapshot clone
-// inherits verbatim — every clone would regenerate the same id. Skips silently
-// when the file is absent (e.g. Android).
+// regenMachineID writes a random /etc/machine-id; systemd-machine-id-setup would derive the SMBIOS uuid every clone inherits.
 func regenMachineID(ctx context.Context) error {
 	if _, err := os.Stat(machineIDPath); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -129,9 +123,7 @@ func regenMachineID(ctx context.Context) error {
 	return nil
 }
 
-// dropStaleDBusMachineID removes a baked regular-file D-Bus copy that would
-// otherwise pin the old id; a symlink or missing file already tracks
-// /etc/machine-id and is left alone.
+// dropStaleDBusMachineID removes a regular-file D-Bus copy that would pin the old id; a symlink already tracks /etc/machine-id.
 func dropStaleDBusMachineID(path string) error {
 	fi, err := os.Lstat(path)
 	if err != nil {

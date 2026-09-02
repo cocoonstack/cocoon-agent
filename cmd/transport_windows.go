@@ -68,59 +68,6 @@ type sockaddrVM struct {
 	_         [3]uint8
 }
 
-func newVsockSocket() (windows.Handle, error) {
-	if err := wsaInit(); err != nil {
-		return 0, err
-	}
-	h, err := windows.Socket(afVsock, windows.SOCK_STREAM, 0)
-	if err != nil {
-		return 0, fmt.Errorf("vsock socket: %w", err)
-	}
-	return h, nil
-}
-
-func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
-	h, err := newVsockSocket()
-	if err != nil {
-		return nil, err
-	}
-	sa := sockaddrVM{Family: afVsock, Port: port, CID: vmAddrCidAny}
-	r, _, callErr := procBind.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock bind requires raw pointer
-	if r == socketError {
-		_ = windows.Closesocket(h)
-		return nil, fmt.Errorf("vsock bind port=%d: %w", port, callErr)
-	}
-	r, _, callErr = procListen.Call(uintptr(h), 32)
-	if r == socketError {
-		_ = windows.Closesocket(h)
-		return nil, fmt.Errorf("vsock listen: %w", callErr)
-	}
-	return &vsockListener{
-		h:      h,
-		port:   port,
-		ctx:    ctx,
-		logger: log.WithFunc("cmd.vsockListener.Accept"),
-	}, nil
-}
-
-func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
-	h, err := newVsockSocket()
-	if err != nil {
-		return nil, err
-	}
-	sa := sockaddrVM{Family: afVsock, Port: port, CID: cid}
-	r, _, callErr := procConnect.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock connect requires raw pointer
-	if r == socketError {
-		_ = windows.Closesocket(h)
-		return nil, fmt.Errorf("vsock connect %d:%d: %w", cid, port, callErr)
-	}
-	return &vsockConn{
-		h:        h,
-		peerCID:  cid,
-		peerPort: port,
-	}, nil
-}
-
 var _ net.Listener = (*vsockListener)(nil)
 
 type vsockListener struct {
@@ -246,3 +193,56 @@ type vsockAddr struct {
 
 func (a *vsockAddr) Network() string { return "vsock" }
 func (a *vsockAddr) String() string  { return fmt.Sprintf("vsock://%d:%d", a.cid, a.port) }
+
+func newVsockSocket() (windows.Handle, error) {
+	if err := wsaInit(); err != nil {
+		return 0, err
+	}
+	h, err := windows.Socket(afVsock, windows.SOCK_STREAM, 0)
+	if err != nil {
+		return 0, fmt.Errorf("vsock socket: %w", err)
+	}
+	return h, nil
+}
+
+func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
+	h, err := newVsockSocket()
+	if err != nil {
+		return nil, err
+	}
+	sa := sockaddrVM{Family: afVsock, Port: port, CID: vmAddrCidAny}
+	r, _, callErr := procBind.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock bind requires raw pointer
+	if r == socketError {
+		_ = windows.Closesocket(h)
+		return nil, fmt.Errorf("vsock bind port=%d: %w", port, callErr)
+	}
+	r, _, callErr = procListen.Call(uintptr(h), 32)
+	if r == socketError {
+		_ = windows.Closesocket(h)
+		return nil, fmt.Errorf("vsock listen: %w", callErr)
+	}
+	return &vsockListener{
+		h:      h,
+		port:   port,
+		ctx:    ctx,
+		logger: log.WithFunc("cmd.vsockListener.Accept"),
+	}, nil
+}
+
+func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
+	h, err := newVsockSocket()
+	if err != nil {
+		return nil, err
+	}
+	sa := sockaddrVM{Family: afVsock, Port: port, CID: cid}
+	r, _, callErr := procConnect.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock connect requires raw pointer
+	if r == socketError {
+		_ = windows.Closesocket(h)
+		return nil, fmt.Errorf("vsock connect %d:%d: %w", cid, port, callErr)
+	}
+	return &vsockConn{
+		h:        h,
+		peerCID:  cid,
+		peerPort: port,
+	}, nil
+}

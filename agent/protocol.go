@@ -74,32 +74,26 @@ func (d *Decoder) Decode() (Message, error) {
 	return m, nil
 }
 
-// Encoder serializes Encode calls so multiple writers (stdout/stderr pumps,
-// stdin protocol-error path) can share one without an external mutex.
+// Encoder serializes frames from several writers onto one stream.
 type Encoder struct {
 	mu       sync.Mutex
-	w        io.Writer
+	enc      *json.Encoder
 	terminal bool
 }
 
 // NewEncoder returns an Encoder writing newline-delimited JSON frames to w.
 func NewEncoder(w io.Writer) *Encoder {
-	return &Encoder{w: w}
+	return &Encoder{enc: json.NewEncoder(w)}
 }
 
-// Encode marshals m as a single newline-terminated JSON frame.
+// Encode writes m as one newline-terminated JSON frame; m.Data is copied before Encode returns.
 func (e *Encoder) Encode(m Message) error {
-	buf, err := json.Marshal(m)
-	if err != nil {
-		return fmt.Errorf("encode frame: %w", err)
-	}
-	buf = append(buf, '\n')
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.terminal {
 		return errTerminalFrameSent
 	}
-	if _, err := e.w.Write(buf); err != nil {
+	if err := e.enc.Encode(m); err != nil {
 		return fmt.Errorf("write frame: %w", err)
 	}
 	if isTerminalFrame(m.Type) {
@@ -130,19 +124,16 @@ func (w *framedWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	// p is safe to alias: Encode → json.Marshal copies Data before returning;
-	// exec.Cmd's I/O pump doesn't reuse p until this Write returns.
 	err := w.enc.Encode(Message{Type: w.msgType, Data: p})
 	if err == nil {
 		return len(p), nil
 	}
-	// Skip errTerminalFrameSent — it's a session-ended race signal, not
-	// a write failure; let runExec's ctx-cause check handle cleanup.
+	// errTerminalFrameSent is the session-ended race, not a write failure
 	if errors.Is(err, errTerminalFrameSent) {
 		return 0, err
 	}
 	errCopy := err
-	if w.lastErr.CompareAndSwap(nil, &errCopy) && w.cancel != nil {
+	if w.lastErr.CompareAndSwap(nil, &errCopy) {
 		w.cancel()
 	}
 	return 0, err

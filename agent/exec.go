@@ -5,21 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 )
 
-// execWaitDelay bounds how long Wait blocks on the child's stdout/stderr
-// pipes after exit: a daemonized grandchild inherits them and would pin
-// the session (and its conn) until it dies.
+// execWaitDelay stops a daemonized grandchild that inherits the pipes from pinning the session after exit.
 const execWaitDelay = 2 * time.Second
 
-// processController hooks platform-specific child-lifecycle steps into
-// runExec: AfterStart runs once cmd.Process exists (Windows assigns the
-// child to its Job Object); Close releases any held kernel resource.
+// processController hooks the platform's child-lifecycle steps into runExec.
 type processController struct {
 	afterStart func(*exec.Cmd) error
 	close      func()
@@ -38,9 +32,7 @@ func (c processController) Close() {
 	}
 }
 
-// runExec runs argv to completion, framing stdout/stderr/exit onto enc.
-// Empty argv → MsgError with no MsgExit; env is merged on top of os.Environ
-// with caller keys winning.
+// runExec runs argv to completion, framing stdout/stderr/exit onto enc; caller env keys override os.Environ.
 func runExec(parentCtx context.Context, argv []string, env map[string]string, stdinFrames <-chan Message, enc *Encoder) error {
 	if len(argv) == 0 {
 		return enc.SendErrorf("exec: argv is empty")
@@ -59,16 +51,17 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	}
 	defer procCtl.Close()
 	if len(env) > 0 {
-		cmd.Env = mergeEnv(env)
+		cmd.Env = os.Environ()
+		for k, v := range env {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
 	}
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		return enc.SendErrorf("exec: open stdin pipe: %v", err)
 	}
-	// cmd.Stdout/Stderr (vs StdoutPipe/StderrPipe) lets cmd.Wait drain
-	// before returning. The pipe-based API closes the parent read fd as
-	// soon as the child exits, racing the pump's last read.
+	// cmd.Stdout/Stderr, not the pipe API: Wait drains them, while pipe fds close at child exit and race the last read
 	stdoutW := newFramedWriter(MsgStdout, enc, cancel)
 	stderrW := newFramedWriter(MsgStderr, enc, cancel)
 	cmd.Stdout = stdoutW
@@ -88,9 +81,7 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 		return enc.SendErrorf("exec: assign process %s: %v", argv[0], err)
 	}
 	if err := enc.Encode(Message{Type: MsgStarted, PID: cmd.Process.Pid}); err != nil {
-		// Wire is dead; kill+reap to avoid a zombie, then surface the
-		// original encoder error rather than masking it with the inevitable
-		// downstream MsgExit failure.
+		// the wire is dead: reap the child and report the encoder error, not the MsgExit failure it causes
 		cancel()
 		_ = cmd.Wait()
 		_ = stdinPipe.Close()
@@ -132,9 +123,7 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	return enc.Encode(Message{Type: MsgExit, ExitCode: exitCode})
 }
 
-// pumpStdin drains stdin frames into the child's pipe; returns on
-// MsgStdinClose, channel close, ctx cancel, or write error. Write errors
-// are silent — child closing stdin early is normal (e.g. `head -1`).
+// pumpStdin feeds stdin frames to the child; a write error is silent because a child closing stdin early is normal.
 func pumpStdin(ctx context.Context, w io.WriteCloser, frames <-chan Message, done chan<- struct{}) {
 	defer close(done)
 	defer w.Close() //nolint:errcheck
@@ -154,27 +143,4 @@ func pumpStdin(ctx context.Context, w io.WriteCloser, frames <-chan Message, don
 			}
 		}
 	}
-}
-
-// mergeEnv layers caller env over os.Environ. Dedup is required: libc getenv
-// returns the first match, so duplicate keys would shadow caller overrides.
-func mergeEnv(callerEnv map[string]string) []string {
-	host := os.Environ()
-	merged := make(map[string]string, len(host)+len(callerEnv))
-	for _, kv := range host {
-		k, v, ok := strings.Cut(kv, "=")
-		if !ok {
-			continue
-		}
-		if _, dup := merged[k]; dup {
-			continue // first occurrence wins, matching libc getenv
-		}
-		merged[k] = v
-	}
-	maps.Copy(merged, callerEnv)
-	out := make([]string, 0, len(merged))
-	for k, v := range merged {
-		out = append(out, k+"="+v)
-	}
-	return out
 }
