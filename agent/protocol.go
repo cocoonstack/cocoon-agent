@@ -14,8 +14,7 @@ import (
 	"sync/atomic"
 )
 
-// Frame types. MsgExit and MsgError are terminal — clients must treat
-// both as session-closed; MsgError is never followed by MsgExit.
+// MsgExit and MsgError are terminal frames; MsgError is never followed by MsgExit.
 const (
 	MsgExec       = "exec"
 	MsgReseed     = "reseed"
@@ -107,8 +106,7 @@ func (e *Encoder) SendErrorf(format string, args ...any) error {
 	return e.Encode(Message{Type: MsgError, Message: fmt.Sprintf(format, args...)})
 }
 
-// framedWriter adapts io.Writer onto framed messages for exec.Cmd's
-// stdout/stderr; the first encode failure fires cancel to kill the child.
+// framedWriter frames exec.Cmd output; the first encode failure fires cancel to kill the child.
 type framedWriter struct {
 	msgType string
 	enc     *Encoder

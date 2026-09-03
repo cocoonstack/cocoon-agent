@@ -10,8 +10,7 @@ import (
 	"github.com/cocoonstack/cocoon-agent/client"
 )
 
-// exitCodeError carries the child exit code through cobra's RunE so
-// Execute() can map it to os.Exit without short-circuiting defers.
+// exitCodeError carries the child exit code through cobra's RunE so defers run before os.Exit.
 type exitCodeError struct{ code int }
 
 func (e *exitCodeError) Error() string { return fmt.Sprintf("exit code %d", e.code) }
@@ -32,8 +31,7 @@ func newClientCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("dial vsock cid=%d port=%d: %w", cid, port, err)
 			}
-			// client.Run owns conn lifecycle: it closes via the runCancel
-			// goroutine before returning, so no defer Close needed here.
+			// client.Run closes conn via its runCancel goroutine, so no defer Close here
 			exitCode, err := client.Run(ctx, conn, args, nil, os.Stdin, os.Stdout, os.Stderr)
 			if err != nil {
 				return err

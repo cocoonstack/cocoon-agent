@@ -98,8 +98,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	// Per-session ctx so a stdin protocol error can kill the child
-	// via runExec's CommandContext.
+	// per-session ctx so a stdin protocol error kills the child via runExec's CommandContext
 	execCtx, execCancel := context.WithCancelCause(ctx)
 	defer execCancel(nil)
 
@@ -112,8 +111,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			frame, err := dec.Decode()
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
-					// Surface protocol corruption as MsgError + kill the
-					// child rather than masquerading as a clean stdin EOF.
+					// protocol corruption must not masquerade as a clean stdin EOF
 					_ = enc.SendErrorf("stdin: %v", err)
 					execCancel(errTerminalFrameSent)
 				}
@@ -133,8 +131,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	if err := runExec(execCtx, first.Argv, first.Env, stdinFrames, enc); err != nil {
 		logger.Warnf(ctx, "exec session ended: %v", err)
 	}
-	// Join the stdin reader without hanging: cancel unblocks it when parked on a
-	// full stdinFrames send (child exited early), Close when parked in Decode.
+	// cancel unblocks the stdin reader parked on a full send, Close unblocks it parked in Decode
 	execCancel(nil)
 	_ = conn.Close()
 	<-stdinDone
@@ -165,8 +162,7 @@ func (s *Server) closeAllConns() {
 	}
 }
 
-// shutdown closes the listener and every in-flight conn. Closing conns
-// unwedges handlers pinned writing to a slow peer so connWG.Wait can return.
+// closing in-flight conns unwedges handlers pinned writing to a slow peer so connWG.Wait returns
 func (s *Server) shutdown() error {
 	err := s.listener.Close()
 	s.closeAllConns()

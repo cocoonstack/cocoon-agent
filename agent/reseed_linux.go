@@ -27,8 +27,7 @@ const (
 	dbusMachineIDPath = "/var/lib/dbus/machine-id"
 )
 
-// runReseed injects host-fed entropy and forces a CRNG reseed so clones don't
-// share the snapshot's CRNG state; steps are best-effort, errors joined.
+// runReseed reseeds the guest CRNG so clones don't share the snapshot's state; steps are best-effort.
 func runReseed(ctx context.Context, req Message, enc *Encoder) error {
 	var errs []error
 
@@ -56,8 +55,7 @@ func runReseed(ctx context.Context, req Message, enc *Encoder) error {
 	return enc.Encode(Message{Type: MsgExit, ExitCode: 0})
 }
 
-// reseedURandom opens /dev/urandom once and runs both entropy injection and
-// CRNG reseed on the same fd, matching the kernel's expected ioctl sequence.
+// reseedURandom runs both ioctls on one /dev/urandom fd, matching the kernel's expected sequence.
 func reseedURandom(data []byte) error {
 	fd, err := unix.Open(urandomPath, unix.O_WRONLY, 0)
 	if err != nil {
@@ -115,8 +113,7 @@ func regenMachineID(ctx context.Context) error {
 	if err := writeRandomMachineID(); err != nil {
 		return err
 	}
-	// Best-effort: /etc/machine-id is already fresh, but a surviving D-Bus copy
-	// keeps serving the old id to dbus consumers — worth a warning.
+	// a surviving D-Bus copy keeps serving the old id, but /etc/machine-id is already fresh
 	if err := dropStaleDBusMachineID(dbusMachineIDPath); err != nil {
 		log.WithFunc("agent.regenMachineID").Warnf(ctx, "drop stale dbus machine id: %v", err)
 	}
@@ -152,8 +149,7 @@ func writeRandomMachineID() error {
 	return nil
 }
 
-// randomMachineID returns a fresh id in /etc/machine-id's canonical
-// 32-hex-lowercase + newline format.
+// randomMachineID returns an id in /etc/machine-id's canonical 32-hex-lowercase plus newline form.
 func randomMachineID() (string, error) {
 	buf := make([]byte, machineIDBytes)
 	if _, err := rand.Read(buf); err != nil {

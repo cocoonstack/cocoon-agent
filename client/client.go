@@ -162,8 +162,7 @@ func pumpStdin(r io.Reader, enc *agent.Encoder, errOut *atomic.Pointer[error], c
 	}
 }
 
-// stdinErr returns the recorded stdin read failure wrapped, or nil if the
-// pump never stored one.
+// stdinErr returns the recorded stdin read failure wrapped, or nil if the pump stored none.
 func stdinErr(p *atomic.Pointer[error]) error {
 	if e := p.Load(); e != nil {
 		return fmt.Errorf("read stdin: %w", *e)

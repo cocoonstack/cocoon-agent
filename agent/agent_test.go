@@ -327,8 +327,6 @@ func TestServerShutdownClosesIdleConn(t *testing.T) {
 			errCh := make(chan error, 1)
 			go func() { errCh <- srv.Serve(ctx) }()
 
-			// A conn that connects but never sends: its handler parks in Decode, so
-			// Serve can only return if shutdown force-closes the tracked conn.
 			conn, err := net.Dial("tcp", tcp.Addr().String())
 			if err != nil {
 				t.Fatalf("dial: %v", err)
@@ -349,7 +347,6 @@ func TestServerWatcherExitsOnPermanentAcceptError(t *testing.T) {
 	before := countGoroutines(serveWatcherFrame)
 
 	srv := agent.NewServer(&errorAcceptListener{err: errors.New("synthetic permanent accept failure")})
-	// Long-lived ctx so only Serve's own return path can release the watcher.
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 

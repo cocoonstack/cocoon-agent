@@ -13,7 +13,7 @@ vsock is host↔guest only, has no IP layer, and the kernel `vhost_vsock` module
 
 ## Status
 
-v0.1.x — Linux + Windows guests supported. PTY mode planned; see [Roadmap](#roadmap).
+v0.2.x — Linux + Windows guests supported. PTY mode planned; see [Roadmap](#roadmap).
 
 ## Design
 
