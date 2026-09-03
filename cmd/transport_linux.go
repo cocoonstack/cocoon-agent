@@ -37,7 +37,6 @@ var _ net.Listener = (*hostOnlyListener)(nil)
 // Peers other than VMADDR_CID_HOST are rejected: VMADDR_CID_LOCAL loopback would let an unprivileged guest process run commands as root.
 type hostOnlyListener struct {
 	net.Listener
-	// ctx is the serve ctx, stashed for Accept-loop diagnostic logging.
 	ctx    context.Context
 	logger *log.Fields
 }

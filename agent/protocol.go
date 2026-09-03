@@ -119,9 +119,6 @@ func newFramedWriter(msgType string, enc *Encoder, cancel context.CancelFunc) *f
 }
 
 func (w *framedWriter) Write(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
 	err := w.enc.Encode(Message{Type: w.msgType, Data: p})
 	if err == nil {
 		return len(p), nil

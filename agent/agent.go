@@ -40,7 +40,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	logger := log.WithFunc("agent.Server.Serve")
 	logger.Infof(ctx, "agent listening on %s", s.listener.Addr())
 
-	stop := context.AfterFunc(ctx, func() { _ = s.shutdown() })
+	stop := context.AfterFunc(ctx, func() { _ = s.Close() })
 	defer stop()
 
 	var connWG sync.WaitGroup
@@ -53,7 +53,7 @@ func (s *Server) Serve(ctx context.Context) error {
 			}
 			logger.Error(ctx, err, "accept")
 			// Unwedge handlers stuck on slow peers before joining.
-			_ = s.shutdown()
+			_ = s.Close()
 			connWG.Wait()
 			return fmt.Errorf("accept: %w", err)
 		}
@@ -65,8 +65,11 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 }
 
+// closing in-flight conns unwedges handlers pinned writing to a slow peer so connWG.Wait returns
 func (s *Server) Close() error {
-	return s.shutdown()
+	err := s.listener.Close()
+	s.closeAllConns()
+	return err
 }
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
@@ -85,7 +88,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 	switch first.Type {
-	case MsgExec: // exec session continues below the switch
+	case MsgExec:
 	case MsgReseed:
 		if err := runReseed(ctx, first, enc); err != nil {
 			logger.Warnf(ctx, "reseed session ended: %v", err)
@@ -160,11 +163,4 @@ func (s *Server) closeAllConns() {
 	for c := range s.conns {
 		_ = c.Close()
 	}
-}
-
-// closing in-flight conns unwedges handlers pinned writing to a slow peer so connWG.Wait returns
-func (s *Server) shutdown() error {
-	err := s.listener.Close()
-	s.closeAllConns()
-	return err
 }

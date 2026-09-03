@@ -49,14 +49,7 @@ readLoop:
 			if serr := stdinErr(&stdinReadErr); serr != nil {
 				return 0, serr
 			}
-			// ctx cancel closes the conn and surfaces here as EOF
-			if ctx.Err() != nil {
-				return 0, ctx.Err()
-			}
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return 0, fmt.Errorf("read frame: %w", err)
+			return 0, decodeErr(ctx, err)
 		}
 		switch frame.Type {
 		case agent.MsgStarted:
@@ -105,13 +98,7 @@ func Reseed(ctx context.Context, conn io.ReadWriteCloser, entropy []byte, regenM
 	for {
 		frame, err := dec.Decode()
 		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if errors.Is(err, io.EOF) {
-				return errNoExitFrame
-			}
-			return fmt.Errorf("read frame: %w", err)
+			return decodeErr(ctx, err)
 		}
 		switch frame.Type {
 		case agent.MsgExit:
@@ -168,4 +155,15 @@ func stdinErr(p *atomic.Pointer[error]) error {
 		return fmt.Errorf("read stdin: %w", *e)
 	}
 	return nil
+}
+
+// decodeErr maps a decode failure to the session outcome: ctx cancel closes the conn and surfaces as EOF.
+func decodeErr(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(err, io.EOF) {
+		return errNoExitFrame
+	}
+	return fmt.Errorf("read frame: %w", err)
 }
