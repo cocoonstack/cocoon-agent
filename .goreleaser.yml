@@ -68,7 +68,8 @@ archives:
       - cocoon-agent-windows
     formats: [zip]
     files:
-      - packaging/install-cocoon-agent.ps1
+      - src: packaging/install-cocoon-agent.ps1
+        strip_parent: true
     name_template: >-
       {{- .ProjectName }}_{{- .Version }}_
       {{- title .Os }}_
@@ -103,7 +104,8 @@ archives:
       - cocoon-agent-windows
     formats: [zip]
     files:
-      - packaging/install-cocoon-agent.ps1
+      - src: packaging/install-cocoon-agent.ps1
+        strip_parent: true
     name_template: >-
       {{- .ProjectName }}_
       {{- title .Os }}_
