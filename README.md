@@ -17,7 +17,7 @@ host (cocoon node)                                  guest VM
 +------------------+                            +------------------------+
 ```
 
-v0.1.x — Linux + Windows guests supported. PTY mode planned; see
+v0.2.x — Linux + Windows guests supported. PTY mode planned; see
 [Roadmap](docs/architecture.md#roadmap).
 
 ## Quick start

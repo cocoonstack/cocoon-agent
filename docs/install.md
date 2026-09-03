@@ -7,9 +7,9 @@ Each release publishes, for linux `x86_64` and `arm64` and for windows
 
 | Asset | Contents |
 |---|---|
-| `cocoon-agent_<version>_Linux_<arch>.tar.gz` | stripped `cocoon-agent` |
-| `cocoon-agent_<version>_Windows_x86_64.zip` | `cocoon-agent.exe` plus `install-cocoon-agent.ps1` |
-| `cocoon-agent_<version>_Linux_<arch>_debug.tar.gz` | unstripped `cocoon-agent.dbg`, for symbol-backed debugging on that node |
+| `cocoon-agent_<version>_Linux_<arch>.tar.gz` | stripped `cocoon-agent`, plus `LICENSE` and `README.md` |
+| `cocoon-agent_<version>_Windows_x86_64.zip` | `cocoon-agent.exe` and `install-cocoon-agent.ps1`, both at the archive root |
+| `cocoon-agent_<version>_Linux_<arch>_debug.tar.gz` | unstripped `cocoon-agent.dbg` for symbol-backed debugging on that node, plus `LICENSE` and `README.md` |
 
 Unversioned aliases (`cocoon-agent_Linux_x86_64.tar.gz`,
 `cocoon-agent_Windows_x86_64.zip`, …) resolve under
@@ -30,7 +30,7 @@ The systemd unit is in [`packaging/cocoon-agent.service`](../packaging/cocoon-ag
 
 ## Windows guest
 
-Windows support requires the `viosock` driver shipped with **virtio-win >= 0.1.285** (Microsoft-attestation signed for Windows 10+). Cocoon's stock Windows images include it. The agent uses the same vsock port (1024) and wire protocol as the Linux build — host-side callers don't need to know which guest OS they're talking to.
+Windows support requires the `viosock` driver shipped with **virtio-win >= 0.1.285** (Microsoft-attestation signed for Windows 10+). Cocoon's stock Windows images include it. The agent uses the same vsock port (1024) and wire protocol as the Linux build, so exec sessions are OS-agnostic. Reseed is not: a Windows agent answers `MsgReseed` with `MsgError` (`reseed is not supported on this OS`), so host-side callers must skip reseed for Windows guests.
 
 ```powershell
 # Run elevated. Idempotent.
