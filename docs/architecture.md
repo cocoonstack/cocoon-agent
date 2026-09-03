@@ -25,8 +25,8 @@ host (cocoon node)                                  guest VM
 | Provider.Run-    |  vsock://<cid>:<port>      |   v                    |
 | InContainer ---> |--------------------------->| cocoon-agent serve     |
 |                  |       (kubectl exec)       |   |                    |
-| (eventually via  |                            |   v                    |
-|  cocoon vm exec) |                            | exec.Command(argv)     |
+| (via cocoon vm   |                            |   v                    |
+|  exec)           |                            | exec.Command(argv)     |
 +------------------+                            +------------------------+
 ```
 
@@ -46,4 +46,4 @@ See [`agent/protocol.go`](../agent/protocol.go) for the complete schema.
 | Windows guests | v0.1.1 | AF_VSOCK via viosock; SCM-registered Windows service; PowerShell installer |
 | Reseed on clone/restore | v0.1.6 | host-fed entropy → guest CRNG reseed + `/etc/machine-id` regen, so clones don't stay correlated (`client.Reseed`) |
 | PTY mode | planned (v0.3) | `tty: true`, window resize, signal forwarding — interactive shells, `vim`/`top` |
-| Streaming host adapter | planned | subprocess-friendly hand-off into vk-cocoon `RunInContainer` |
+| Streaming host adapter | shipped | vk-cocoon `RunInContainer` shells out to `cocoon vm exec` with stdio and the exit code wired through |

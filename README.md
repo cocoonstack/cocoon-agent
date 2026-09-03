@@ -12,8 +12,8 @@ host (cocoon node)                                  guest VM
 | Provider.Run-    |  vsock://<cid>:<port>      |   v                    |
 | InContainer ---> |--------------------------->| cocoon-agent serve     |
 |                  |       (kubectl exec)       |   |                    |
-| (eventually via  |                            |   v                    |
-|  cocoon vm exec) |                            | exec.Command(argv)     |
+| (via cocoon vm   |                            |   v                    |
+|  exec)           |                            | exec.Command(argv)     |
 +------------------+                            +------------------------+
 ```
 
@@ -49,7 +49,7 @@ make help         # full target list
 ## Related
 
 - [cocoon](https://github.com/cocoonstack/cocoon) — VM engine
-- [vk-cocoon](https://github.com/cocoonstack/vk-cocoon) — virtual-kubelet provider; the planned primary consumer of cocoon-agent
+- [vk-cocoon](https://github.com/cocoonstack/vk-cocoon) — virtual-kubelet provider; the primary consumer of cocoon-agent
 - [cocoon-common](https://github.com/cocoonstack/cocoon-common) — shared metadata / annotation contract
 
 ## License

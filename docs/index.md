@@ -15,8 +15,8 @@ host (cocoon node)                                  guest VM
 | Provider.Run-    |  vsock://<cid>:<port>      |   v                    |
 | InContainer ---> |--------------------------->| cocoon-agent serve     |
 |                  |       (kubectl exec)       |   |                    |
-| (eventually via  |                            |   v                    |
-|  cocoon vm exec) |                            | exec.Command(argv)     |
+| (via cocoon vm   |                            |   v                    |
+|  exec)           |                            | exec.Command(argv)     |
 +------------------+                            +------------------------+
 ```
 
