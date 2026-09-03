@@ -38,8 +38,7 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 		return enc.SendErrorf("exec: argv is empty")
 	}
 
-	// Inner ctx so an encoder failure can kill the child via
-	// exec.CommandContext instead of letting it run against a dead conn.
+	// inner ctx so an encoder failure kills the child instead of leaving it against a dead conn
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 
@@ -73,8 +72,7 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	}
 	if err := procCtl.AfterStart(cmd); err != nil {
 		cancel()
-		// Child isn't in the Windows Job Object yet, so cancel doesn't reach
-		// it via CloseHandle(job); explicit Kill is required.
+		// cancel cannot reach a child not yet in the Windows Job Object, so Kill is required
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		_ = stdinPipe.Close()
@@ -92,8 +90,7 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	go pumpStdin(ctx, stdinPipe, stdinFrames, stdinDone)
 
 	waitErr := cmd.Wait()
-	// Cancel so the stdin pump unblocks if the client never sent
-	// MsgStdinClose — otherwise <-stdinDone hangs forever.
+	// cancel unblocks the stdin pump when the client never sent MsgStdinClose
 	cancel()
 	<-stdinDone
 
@@ -101,8 +98,7 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 		return nil
 	}
 
-	// Surface any encoder error in preference to the child's exit —
-	// the client never received MsgExit anyway.
+	// an encoder error outranks the child's exit: the client never received MsgExit
 	if encErr := errors.Join(stdoutW.err(), stderrW.err()); encErr != nil {
 		return fmt.Errorf("write child output: %w", encErr)
 	}

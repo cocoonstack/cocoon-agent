@@ -1,6 +1,5 @@
 //go:build windows
 
-// AF_VSOCK on Windows comes from the viosock Winsock provider shipped with virtio-win >= 0.1.285.
 // x/sys/windows.Bind cannot carry AF_VSOCK (unexported method on its Sockaddr interface), so the ws2_32.dll procs are called directly.
 
 package cmd
@@ -21,8 +20,7 @@ import (
 )
 
 const (
-	// afVsock matches Linux AF_VSOCK so the wire protocol is identical
-	// across guests; viosock registers the same number on Windows.
+	// viosock registers the same number as Linux AF_VSOCK, so one wire protocol serves both guests
 	afVsock = 40
 
 	// host-only filter: only host-originated peers may drive the agent.
