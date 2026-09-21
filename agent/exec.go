@@ -67,7 +67,6 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	cmd.Stderr = stderrW
 
 	if err := cmd.Start(); err != nil {
-		_ = stdinPipe.Close()
 		return enc.SendErrorf("exec: start %s: %v", argv[0], err)
 	}
 	if err := procCtl.AfterStart(cmd); err != nil {
@@ -75,14 +74,12 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 		// cancel cannot reach a child not yet in the Windows Job Object, so Kill is required
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-		_ = stdinPipe.Close()
 		return enc.SendErrorf("exec: assign process %s: %v", argv[0], err)
 	}
 	if err := enc.Encode(Message{Type: MsgStarted, PID: cmd.Process.Pid}); err != nil {
 		// the wire is dead: reap the child and report the encoder error, not the MsgExit failure it causes
 		cancel()
 		_ = cmd.Wait()
-		_ = stdinPipe.Close()
 		return fmt.Errorf("send started frame: %w", err)
 	}
 
