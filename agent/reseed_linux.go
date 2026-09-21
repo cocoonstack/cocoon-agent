@@ -68,8 +68,8 @@ func reseedURandom(data []byte) error {
 			errs = append(errs, fmt.Errorf("add entropy: %w", err))
 		}
 	}
-	if err := reseedCRNG(fd); err != nil {
-		errs = append(errs, fmt.Errorf("reseed crng: %w", err))
+	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), unix.RNDRESEEDCRNG, 0); errno != 0 {
+		errs = append(errs, fmt.Errorf("reseed crng: ioctl RNDRESEEDCRNG: %w", errno))
 	}
 	if err := unix.Close(fd); err != nil {
 		errs = append(errs, fmt.Errorf("close %s: %w", urandomPath, err))
@@ -91,13 +91,6 @@ func addEntropy(fd int, data []byte) error {
 
 	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), unix.RNDADDENTROPY, uintptr(unsafe.Pointer(&buf[0]))); errno != 0 { //nolint:gosec // ioctl requires a raw pointer to the hand-built rand_pool_info buffer
 		return fmt.Errorf("ioctl RNDADDENTROPY: %w", errno)
-	}
-	return nil
-}
-
-func reseedCRNG(fd int) error {
-	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), unix.RNDRESEEDCRNG, 0); errno != 0 {
-		return fmt.Errorf("ioctl RNDRESEEDCRNG: %w", errno)
 	}
 	return nil
 }
