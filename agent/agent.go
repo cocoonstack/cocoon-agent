@@ -18,7 +18,7 @@ const (
 	stdinFrameBuffer = 8
 )
 
-// Server runs the agent accept loop. One exec per accepted connection.
+// Server handles one request per accepted connection.
 type Server struct {
 	listener net.Listener
 
@@ -52,7 +52,7 @@ func (s *Server) Serve(ctx context.Context) error {
 				return nil
 			}
 			logger.Error(ctx, err, "accept")
-			// Unwedge handlers stuck on slow peers before joining.
+			// closing connections releases handlers blocked on peer I/O
 			_ = s.Close()
 			connWG.Wait()
 			return fmt.Errorf("accept: %w", err)
@@ -65,7 +65,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 }
 
-// closing in-flight conns unwedges handlers pinned writing to a slow peer so connWG.Wait returns
+// Close closes the listener and all active connections.
 func (s *Server) Close() error {
 	err := s.listener.Close()
 	s.closeAllConns()
@@ -101,7 +101,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	// per-session ctx so a stdin protocol error kills the child via runExec's CommandContext
+	// peer disconnects must cancel the child without stopping the server
 	execCtx, execCancel := context.WithCancelCause(ctx)
 	defer execCancel(nil)
 
@@ -110,6 +110,8 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	go func() {
 		defer close(stdinDone)
 		defer close(stdinFrames)
+		defer execCancel(nil)
+		stdinClosed := false
 		for {
 			frame, err := dec.Decode()
 			if err != nil {
@@ -120,14 +122,15 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 				}
 				return
 			}
+			if stdinClosed {
+				continue
+			}
 			select {
 			case stdinFrames <- frame:
 			case <-execCtx.Done():
 				return
 			}
-			if frame.Type == MsgStdinClose {
-				return
-			}
+			stdinClosed = frame.Type == MsgStdinClose
 		}
 	}()
 

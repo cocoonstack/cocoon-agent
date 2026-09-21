@@ -62,7 +62,6 @@ Copy-Item -Path $BinarySource -Destination $BinaryDest -Force
 # with the same string also mangles it because cmd's command-line quote
 # stripping rules differ between argv and "/c <string>". A .bat file is
 # the boring path that all three of those parsers handle the same way.
-$binPath = "`"$BinaryDest`" serve --port $Port"
 function Invoke-Bat {
     param([string]$Body)
     $bat = Join-Path $env:TEMP ("cocoon-svc-{0:N}.bat" -f [guid]::NewGuid())
