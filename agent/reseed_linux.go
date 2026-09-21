@@ -34,7 +34,7 @@ func runReseed(ctx context.Context, req Message, enc *Encoder) error {
 	if err := reseedURandom(req.Data); err != nil {
 		errs = append(errs, err)
 	}
-	clear(req.Data) // host entropy is single-use; don't leave it on the heap
+	clear(req.Data) // host entropy is single-use; drop the decoded copy
 	if err := os.Remove(systemdRandomSeed); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		errs = append(errs, fmt.Errorf("remove systemd random seed: %w", err))
 	}
