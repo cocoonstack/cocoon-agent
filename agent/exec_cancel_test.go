@@ -52,13 +52,23 @@ func TestExecDisconnectCancelsQuietChild(t *testing.T) {
 				}
 			}
 			dec := NewDecoder(peer)
-			started, err := dec.Decode()
-			if err != nil || started.Type != MsgStarted {
-				t.Fatalf("start frame = %+v, err = %v", started, err)
+			var sawStarted, sawReady bool
+			for range 2 {
+				frame, err := dec.Decode()
+				if err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				switch {
+				case frame.Type == MsgStarted:
+					sawStarted = true
+				case frame.Type == MsgStdout && string(frame.Data) == "ready":
+					sawReady = true
+				default:
+					t.Fatalf("unexpected frame %+v", frame)
+				}
 			}
-			ready, err := dec.Decode()
-			if err != nil || ready.Type != MsgStdout || string(ready.Data) != "ready" {
-				t.Fatalf("ready frame = %+v, err = %v", ready, err)
+			if !sawStarted || !sawReady {
+				t.Fatalf("started=%v ready=%v: both frames must arrive before the disconnect", sawStarted, sawReady)
 			}
 			if err := peer.Close(); err != nil {
 				t.Fatalf("disconnect: %v", err)
