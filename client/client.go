@@ -1,6 +1,4 @@
 // Package client wraps the cocoon-agent wire protocol for host-side use.
-// Transport-agnostic: Run takes io.ReadWriteCloser so callers swap in
-// vsock.Dial, net.Dial, or an in-memory pipe for tests.
 package client
 
 import (
@@ -39,7 +37,6 @@ func Run(ctx context.Context, conn io.ReadWriteCloser, argv []string, env map[st
 	}
 
 	exitCode := 0
-	var sawExit bool
 
 readLoop:
 	for {
@@ -66,7 +63,6 @@ readLoop:
 			}
 		case agent.MsgExit:
 			exitCode = frame.ExitCode
-			sawExit = true
 			break readLoop
 		case agent.MsgError:
 			return 0, fmt.Errorf("agent: %s", frame.Message)
@@ -77,13 +73,6 @@ readLoop:
 
 	if serr := stdinErr(&stdinReadErr); serr != nil {
 		return 0, serr
-	}
-	if !sawExit {
-		// Same ctx-cancel-races-MsgExit case as the readLoop EOF path.
-		if ctx.Err() != nil {
-			return 0, ctx.Err()
-		}
-		return 0, errNoExitFrame
 	}
 	return exitCode, nil
 }
@@ -114,7 +103,6 @@ func Reseed(ctx context.Context, conn io.ReadWriteCloser, entropy []byte, regenM
 	}
 }
 
-// openSession wires ctx cancellation to conn.Close and sends the opening frame.
 func openSession(ctx context.Context, conn io.ReadWriteCloser, first agent.Message) (*agent.Encoder, *agent.Decoder, context.CancelFunc, error) {
 	// Sub-ctx so the conn-closer doesn't outlive the session on a longer-lived caller ctx.
 	sessCtx, cancel := context.WithCancel(ctx)
@@ -127,7 +115,6 @@ func openSession(ctx context.Context, conn io.ReadWriteCloser, first agent.Messa
 	return enc, agent.NewDecoder(conn), cancel, nil
 }
 
-// pumpStdin streams stdin as MsgStdin frames, MsgStdinClose at EOF; a non-EOF read error is recorded and cancels Run.
 func pumpStdin(r io.Reader, enc *agent.Encoder, errOut *atomic.Pointer[error], cancel context.CancelFunc) {
 	buf := make([]byte, stdinChunkSize)
 	for {
@@ -149,7 +136,6 @@ func pumpStdin(r io.Reader, enc *agent.Encoder, errOut *atomic.Pointer[error], c
 	}
 }
 
-// stdinErr returns the recorded stdin read failure wrapped, or nil if the pump stored none.
 func stdinErr(p *atomic.Pointer[error]) error {
 	if e := p.Load(); e != nil {
 		return fmt.Errorf("read stdin: %w", *e)

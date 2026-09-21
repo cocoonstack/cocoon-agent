@@ -4,20 +4,13 @@ In-VM exec agent for [Cocoon](https://github.com/cocoonstack/cocoon)-managed VMs
 
 **Documentation: [cocoonstack.github.io/cocoon-agent](https://cocoonstack.github.io/cocoon-agent/)** (source in [`docs/`](docs/)).
 
-```
-host (cocoon node)                                  guest VM
-+------------------+                            +------------------------+
-| vk-cocoon        |                            | systemd                |
-|                  |                            |   |                    |
-| Provider.Run-    |  vsock://<cid>:<port>      |   v                    |
-| InContainer ---> |--------------------------->| cocoon-agent serve     |
-|                  |       (kubectl exec)       |   |                    |
-| (via cocoon vm   |                            |   v                    |
-|  exec)           |                            | exec.Command(argv)     |
-+------------------+                            +------------------------+
-```
+## Highlights
 
-v0.2.x — Linux + Windows guests supported. PTY mode planned; see
+- Linux and Windows guest exec with stdin, stdout, stderr, and exit-code forwarding.
+- Host access through `cocoon vm exec`; direct AF_VSOCK client for smoke tests.
+- Linux clone/restore reseed with optional machine-ID regeneration.
+
+PTY mode is planned; see
 [Roadmap](docs/architecture.md#roadmap).
 
 ## Quick start
@@ -28,29 +21,22 @@ cocoon-agent client --cid 3 --port 1024 -- echo "hello from guest"
 
 Full steps in [Usage](docs/usage.md).
 
-## Documentation
+## Related projects
 
-- [Architecture](docs/architecture.md) — why cocoon-agent exists, current status, the wire protocol, and the roadmap
-- [Installation](docs/install.md) — baking the Linux binary into an image, the Windows service installer, and pipe-mode limitations
-- [Usage](docs/usage.md) — smoke-testing an agent from the host with the `client` subcommand
-- [Configuration](docs/configuration.md) — environment variables and CLI flags
-- [Build](docs/build.md) — cross-compiling for Linux and Windows guests
+- [cocoon](https://github.com/cocoonstack/cocoon) — VM engine
+- [vk-cocoon](https://github.com/cocoonstack/vk-cocoon) — virtual-kubelet provider; the primary consumer of cocoon-agent
+- [cocoon-common](https://github.com/cocoonstack/cocoon-common) — shared metadata / annotation contract
 
 ## Development
 
 ```bash
 make all          # tidy + fmt + lint + test + build
-make test         # go test -race -cover
+make build        # build the local binary
+make test         # vet + tests with race detection and coverage
 make lint         # golangci-lint on linux + darwin + windows
-make fmt-check    # gofumpt + goimports check
-make help         # full target list
+make fmt          # gofumpt + goimports
+make fmt-check    # check formatting without changing files
 ```
-
-## Related
-
-- [cocoon](https://github.com/cocoonstack/cocoon) — VM engine
-- [vk-cocoon](https://github.com/cocoonstack/vk-cocoon) — virtual-kubelet provider; the primary consumer of cocoon-agent
-- [cocoon-common](https://github.com/cocoonstack/cocoon-common) — shared metadata / annotation contract
 
 ## License
 
