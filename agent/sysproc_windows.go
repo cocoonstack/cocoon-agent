@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -28,7 +29,7 @@ func (c *windowsProcessController) assign(cmd *exec.Cmd) error {
 	if err := windows.AssignProcessToJobObject(c.job, proc); err != nil {
 		return fmt.Errorf("assign process to job object: %w", err)
 	}
-	return nil
+	return resumeInitialThread(pid)
 }
 
 func (c *windowsProcessController) cancel() error {
@@ -56,10 +57,40 @@ func setupProcess(cmd *exec.Cmd) (processController, error) {
 	}
 
 	ctl := &windowsProcessController{job: job, close: sync.OnceFunc(func() { _ = windows.CloseHandle(job) })}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
 	cmd.Cancel = ctl.cancel
 
 	return processController{
 		afterStart: ctl.assign,
 		close:      ctl.close,
 	}, nil
+}
+
+func resumeInitialThread(pid uint32) error {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
+	if err != nil {
+		return fmt.Errorf("snapshot threads: %w", err)
+	}
+	defer windows.CloseHandle(snap) //nolint:errcheck
+
+	var entry windows.ThreadEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+	err = windows.Thread32First(snap, &entry)
+	for err == nil && entry.OwnerProcessID != pid {
+		err = windows.Thread32Next(snap, &entry)
+	}
+	if err != nil {
+		return fmt.Errorf("find thread of process %d: %w", pid, err)
+	}
+
+	thread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, entry.ThreadID)
+	if err != nil {
+		return fmt.Errorf("open thread: %w", err)
+	}
+	defer windows.CloseHandle(thread) //nolint:errcheck
+
+	if _, err := windows.ResumeThread(thread); err != nil {
+		return fmt.Errorf("resume thread: %w", err)
+	}
+	return nil
 }
