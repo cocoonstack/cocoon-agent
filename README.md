@@ -16,7 +16,7 @@ PTY mode is planned; see
 ## Quick start
 
 ```bash
-cocoon-agent client --cid 3 --port 1024 -- echo "hello from guest"
+cocoon vm exec <vm> -- echo "hello from guest"
 ```
 
 Full steps in [Usage](docs/usage.md).
