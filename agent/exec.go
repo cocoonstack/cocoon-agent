@@ -101,10 +101,9 @@ func runExec(parentCtx context.Context, argv []string, env map[string]string, st
 	}
 
 	exitCode := 0
-	var exitErr *exec.ExitError
-	switch {
+	switch exitErr, isExit := errors.AsType[*exec.ExitError](waitErr); {
 	case waitErr == nil:
-	case errors.As(waitErr, &exitErr):
+	case isExit:
 		exitCode = exitErr.ExitCode()
 	case errors.Is(waitErr, exec.ErrWaitDelay):
 		// Pipes were abandoned to a background child; the command itself exited.
