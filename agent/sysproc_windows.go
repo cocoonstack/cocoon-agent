@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"os/exec"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+var ntResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
 
 // windowsProcessController owns the Job Object of one runExec session; cmd.Cancel and runExec's deferred close both release it.
 type windowsProcessController struct {
@@ -19,7 +22,7 @@ type windowsProcessController struct {
 
 func (c *windowsProcessController) assign(cmd *exec.Cmd) error {
 	pid := uint32(cmd.Process.Pid) //nolint:gosec // the OS hands out PIDs as DWORDs; the int round-trip can't overflow
-	proc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, pid)
+	proc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.PROCESS_SUSPEND_RESUME, false, pid)
 	if err != nil {
 		return fmt.Errorf("open process: %w", err)
 	}
@@ -28,7 +31,7 @@ func (c *windowsProcessController) assign(cmd *exec.Cmd) error {
 	if err := windows.AssignProcessToJobObject(c.job, proc); err != nil {
 		return fmt.Errorf("assign process to job object: %w", err)
 	}
-	return nil
+	return resumeProcess(proc)
 }
 
 func (c *windowsProcessController) cancel() error {
@@ -56,10 +59,21 @@ func setupProcess(cmd *exec.Cmd) (processController, error) {
 	}
 
 	ctl := &windowsProcessController{job: job, close: sync.OnceFunc(func() { _ = windows.CloseHandle(job) })}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
 	cmd.Cancel = ctl.cancel
 
 	return processController{
 		afterStart: ctl.assign,
 		close:      ctl.close,
 	}, nil
+}
+
+func resumeProcess(proc windows.Handle) error {
+	if err := ntResumeProcess.Find(); err != nil {
+		return err
+	}
+	if status, _, _ := ntResumeProcess.Call(uintptr(proc)); status != 0 {
+		return fmt.Errorf("resume process: NTSTATUS 0x%x", status)
+	}
+	return nil
 }
