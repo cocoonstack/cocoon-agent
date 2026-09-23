@@ -12,6 +12,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+var ntResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
+
 // windowsProcessController owns the Job Object of one runExec session; cmd.Cancel and runExec's deferred close both release it.
 type windowsProcessController struct {
 	job   windows.Handle
@@ -20,7 +22,7 @@ type windowsProcessController struct {
 
 func (c *windowsProcessController) assign(cmd *exec.Cmd) error {
 	pid := uint32(cmd.Process.Pid) //nolint:gosec // the OS hands out PIDs as DWORDs; the int round-trip can't overflow
-	proc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, pid)
+	proc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.PROCESS_SUSPEND_RESUME, false, pid)
 	if err != nil {
 		return fmt.Errorf("open process: %w", err)
 	}
@@ -29,7 +31,7 @@ func (c *windowsProcessController) assign(cmd *exec.Cmd) error {
 	if err := windows.AssignProcessToJobObject(c.job, proc); err != nil {
 		return fmt.Errorf("assign process to job object: %w", err)
 	}
-	return resumeInitialThread(pid)
+	return resumeProcess(proc)
 }
 
 func (c *windowsProcessController) cancel() error {
@@ -66,31 +68,12 @@ func setupProcess(cmd *exec.Cmd) (processController, error) {
 	}, nil
 }
 
-func resumeInitialThread(pid uint32) error {
-	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
-	if err != nil {
-		return fmt.Errorf("snapshot threads: %w", err)
+func resumeProcess(proc windows.Handle) error {
+	if err := ntResumeProcess.Find(); err != nil {
+		return err
 	}
-	defer windows.CloseHandle(snap) //nolint:errcheck
-
-	var entry windows.ThreadEntry32
-	entry.Size = uint32(unsafe.Sizeof(entry))
-	err = windows.Thread32First(snap, &entry)
-	for err == nil && entry.OwnerProcessID != pid {
-		err = windows.Thread32Next(snap, &entry)
-	}
-	if err != nil {
-		return fmt.Errorf("find thread of process %d: %w", pid, err)
-	}
-
-	thread, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, entry.ThreadID)
-	if err != nil {
-		return fmt.Errorf("open thread: %w", err)
-	}
-	defer windows.CloseHandle(thread) //nolint:errcheck
-
-	if _, err := windows.ResumeThread(thread); err != nil {
-		return fmt.Errorf("resume thread: %w", err)
+	if status, _, _ := ntResumeProcess.Call(uintptr(proc)); status != 0 {
+		return fmt.Errorf("resume process: NTSTATUS 0x%x", status)
 	}
 	return nil
 }
