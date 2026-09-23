@@ -14,31 +14,6 @@ import (
 
 var ntResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
 
-// windowsProcessController owns the Job Object of one runExec session; cmd.Cancel and runExec's deferred close both release it.
-type windowsProcessController struct {
-	job   windows.Handle
-	close func()
-}
-
-func (c *windowsProcessController) assign(cmd *exec.Cmd) error {
-	pid := uint32(cmd.Process.Pid) //nolint:gosec // the OS hands out PIDs as DWORDs; the int round-trip can't overflow
-	proc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.PROCESS_SUSPEND_RESUME, false, pid)
-	if err != nil {
-		return fmt.Errorf("open process: %w", err)
-	}
-	defer windows.CloseHandle(proc) //nolint:errcheck
-
-	if err := windows.AssignProcessToJobObject(c.job, proc); err != nil {
-		return fmt.Errorf("assign process to job object: %w", err)
-	}
-	return resumeProcess(proc)
-}
-
-func (c *windowsProcessController) cancel() error {
-	c.close()
-	return nil
-}
-
 // setupProcess creates a kill-on-close Job Object so the child's whole process tree dies with the session.
 func setupProcess(cmd *exec.Cmd) (processController, error) {
 	job, err := windows.CreateJobObject(nil, nil)
@@ -58,14 +33,28 @@ func setupProcess(cmd *exec.Cmd) (processController, error) {
 		return processController{}, fmt.Errorf("set job object limits: %w", err)
 	}
 
-	ctl := &windowsProcessController{job: job, close: sync.OnceFunc(func() { _ = windows.CloseHandle(job) })}
+	closeJob := sync.OnceFunc(func() { _ = windows.CloseHandle(job) })
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
-	cmd.Cancel = ctl.cancel
+	cmd.Cancel = func() error { closeJob(); return nil }
 
 	return processController{
-		afterStart: ctl.assign,
-		close:      ctl.close,
+		afterStart: func(cmd *exec.Cmd) error { return assignToJob(job, cmd) },
+		close:      closeJob,
 	}, nil
+}
+
+func assignToJob(job windows.Handle, cmd *exec.Cmd) error {
+	pid := uint32(cmd.Process.Pid) //nolint:gosec // the OS hands out PIDs as DWORDs; the int round-trip can't overflow
+	proc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|windows.PROCESS_SUSPEND_RESUME, false, pid)
+	if err != nil {
+		return fmt.Errorf("open process: %w", err)
+	}
+	defer windows.CloseHandle(proc) //nolint:errcheck
+
+	if err := windows.AssignProcessToJobObject(job, proc); err != nil {
+		return fmt.Errorf("assign process to job object: %w", err)
+	}
+	return resumeProcess(proc)
 }
 
 func resumeProcess(proc windows.Handle) error {
