@@ -5,7 +5,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 
 	"github.com/mdlayher/vsock"
@@ -45,14 +44,6 @@ func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
 		ctx:      ctx,
 		logger:   log.WithFunc("cmd.hostOnlyListener.Accept"),
 	}, nil
-}
-
-func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
-	conn, err := vsock.Dial(cid, port, nil)
-	if err != nil {
-		return nil, fmt.Errorf("vsock dial: %w", err)
-	}
-	return conn, nil
 }
 
 func isHostPeer(conn net.Conn) bool {

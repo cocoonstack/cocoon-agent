@@ -26,8 +26,8 @@ host (cocoon node)                                  guest VM
   status, the wire protocol, and the roadmap
 - [Installation](install.md) — baking the Linux binary into an image,
   the Windows service installer, and pipe-mode limitations
-- [Usage](usage.md) — smoke-testing an agent from the host with the
-  `client` subcommand
+- [Usage](usage.md) — smoke-testing an agent from the host with
+  `cocoon vm exec`
 - [Configuration](configuration.md) — environment variables and CLI flags
 - [Build](build.md) — cross-compiling for Linux and Windows guests
 
