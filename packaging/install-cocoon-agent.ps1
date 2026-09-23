@@ -83,10 +83,12 @@ if ($existing) {
     Write-Step "creating service $ServiceName"
     Invoke-Bat ('sc.exe create {0} binPath= "\"{1}\" serve --port {2}" start= auto DisplayName= "{3}"' -f $ServiceName, $BinaryDest, $Port, $DisplayName)
     Invoke-Bat ('sc.exe description {0} "{1}"' -f $ServiceName, $Description)
-    # 24h reset window mirrors Linux's Restart=always intent — a flapping
-    # bug self-heals instead of permanently bricking the agent.
-    Invoke-Bat ('sc.exe failure {0} reset= 86400 actions= restart/5000/restart/5000/restart/5000' -f $ServiceName)
 }
+
+# 24h reset window mirrors Linux's Restart=always intent — a flapping
+# bug self-heals instead of permanently bricking the agent.
+Invoke-Bat ('sc.exe failure {0} reset= 86400 actions= restart/5000/restart/5000/restart/5000' -f $ServiceName)
+Invoke-Bat ('sc.exe failureflag {0} 1' -f $ServiceName)
 
 # Confirm registration before attempting Start-Service; otherwise an SCM hiccup
 # in step 3 would surface here as a misleading "service not found" error.
