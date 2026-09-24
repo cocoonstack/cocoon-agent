@@ -3,7 +3,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -21,12 +20,11 @@ func NewRootCmd() *cobra.Command {
 		Use:     "cocoon-agent",
 		Short:   "vsock-based command exec agent for Cocoon-managed VMs",
 		Version: fmt.Sprintf("%s (rev=%s built=%s)", version.VERSION, version.REVISION, version.BUILTAT),
-		// run logs and maps exit codes itself, so cobra's Error/Usage dump would double up
+		// run logs the error itself, so cobra's Error/Usage dump would double up
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
 	rootCmd.AddCommand(newServeCmd())
-	rootCmd.AddCommand(newClientCmd())
 	return rootCmd
 }
 
@@ -53,9 +51,6 @@ func run() int {
 	}
 
 	if err := NewRootCmd().ExecuteContext(ctx); err != nil {
-		if ec, ok := errors.AsType[*exitCodeError](err); ok {
-			return ec.code
-		}
 		log.WithFunc("cmd.run").Error(ctx, err, "command failed")
 		return 1
 	}

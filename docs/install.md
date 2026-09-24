@@ -37,7 +37,7 @@ Windows support requires the `viosock` driver shipped with **virtio-win >= 0.1.2
 .\install-cocoon-agent.ps1
 ```
 
-The script copies `cocoon-agent.exe` to `C:\Program Files\Cocoon\`, registers a Windows service (`cocoon-agent`, `LocalSystem`, auto-start, restart-on-crash), and starts it. See [`packaging/install-cocoon-agent.ps1`](../packaging/install-cocoon-agent.ps1).
+The script copies `cocoon-agent.exe` to `C:\Program Files\Cocoon\`, registers a Windows service (`cocoon-agent`, `LocalSystem`, auto-start, restart on failure), and starts it. See [`packaging/install-cocoon-agent.ps1`](../packaging/install-cocoon-agent.ps1).
 
 Verify it's running:
 

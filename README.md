@@ -7,7 +7,7 @@ In-VM exec agent for [Cocoon](https://github.com/cocoonstack/cocoon)-managed VMs
 ## Highlights
 
 - Linux and Windows guest exec with stdin, stdout, stderr, and exit-code forwarding.
-- Host access through `cocoon vm exec`; direct AF_VSOCK client for smoke tests.
+- Host access through `cocoon vm exec`.
 - Linux clone/restore reseed with optional machine-ID regeneration.
 
 PTY mode is planned; see
@@ -16,7 +16,7 @@ PTY mode is planned; see
 ## Quick start
 
 ```bash
-cocoon-agent client --cid 3 --port 1024 -- echo "hello from guest"
+cocoon vm exec <vm> -- echo "hello from guest"
 ```
 
 Full steps in [Usage](docs/usage.md).

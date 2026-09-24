@@ -37,7 +37,6 @@ var (
 	procBind       = modws2_32.NewProc("bind")
 	procListen     = modws2_32.NewProc("listen")
 	procAccept     = modws2_32.NewProc("accept")
-	procConnect    = modws2_32.NewProc("connect")
 	procRecv       = modws2_32.NewProc("recv")
 	procSend       = modws2_32.NewProc("send")
 	procWSAStartup = modws2_32.NewProc("WSAStartup")
@@ -192,21 +191,13 @@ type vsockAddr struct {
 func (a *vsockAddr) Network() string { return "vsock" }
 func (a *vsockAddr) String() string  { return fmt.Sprintf("vsock://%d:%d", a.cid, a.port) }
 
-func newVsockSocket() (windows.Handle, error) {
+func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
 	if err := wsaInit(); err != nil {
-		return 0, err
+		return nil, err
 	}
 	h, err := windows.Socket(afVsock, windows.SOCK_STREAM, 0)
 	if err != nil {
-		return 0, fmt.Errorf("vsock socket: %w", err)
-	}
-	return h, nil
-}
-
-func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
-	h, err := newVsockSocket()
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("vsock socket: %w", err)
 	}
 	sa := sockaddrVM{Family: afVsock, Port: port, CID: vmAddrCidAny}
 	r, _, callErr := procBind.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock bind requires raw pointer
@@ -224,23 +215,5 @@ func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
 		port:   port,
 		ctx:    ctx,
 		logger: log.WithFunc("cmd.vsockListener.Accept"),
-	}, nil
-}
-
-func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
-	h, err := newVsockSocket()
-	if err != nil {
-		return nil, err
-	}
-	sa := sockaddrVM{Family: afVsock, Port: port, CID: cid}
-	r, _, callErr := procConnect.Call(uintptr(h), uintptr(unsafe.Pointer(&sa)), uintptr(sockaddrVMSize)) //nolint:gosec // winsock connect requires raw pointer
-	if r == socketError {
-		_ = windows.Closesocket(h)
-		return nil, fmt.Errorf("vsock connect %d:%d: %w", cid, port, callErr)
-	}
-	return &vsockConn{
-		h:        h,
-		peerCID:  cid,
-		peerPort: port,
 	}, nil
 }

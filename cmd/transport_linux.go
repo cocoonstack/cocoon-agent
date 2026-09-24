@@ -5,32 +5,11 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 
 	"github.com/mdlayher/vsock"
 	"github.com/projecteru2/core/log"
 )
-
-func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
-	l, err := vsock.Listen(port, nil)
-	if err != nil {
-		return nil, fmt.Errorf("vsock listen: %w", err)
-	}
-	return &hostOnlyListener{
-		Listener: l,
-		ctx:      ctx,
-		logger:   log.WithFunc("cmd.hostOnlyListener.Accept"),
-	}, nil
-}
-
-func dialVsock(cid, port uint32) (io.ReadWriteCloser, error) {
-	conn, err := vsock.Dial(cid, port, nil)
-	if err != nil {
-		return nil, fmt.Errorf("vsock dial: %w", err)
-	}
-	return conn, nil
-}
 
 var _ net.Listener = (*hostOnlyListener)(nil)
 
@@ -53,6 +32,18 @@ func (l *hostOnlyListener) Accept() (net.Conn, error) {
 		l.logger.Warnf(l.ctx, "rejecting non-host vsock peer %s", conn.RemoteAddr())
 		_ = conn.Close()
 	}
+}
+
+func listenVsock(ctx context.Context, port uint32) (net.Listener, error) {
+	l, err := vsock.Listen(port, nil)
+	if err != nil {
+		return nil, fmt.Errorf("vsock listen: %w", err)
+	}
+	return &hostOnlyListener{
+		Listener: l,
+		ctx:      ctx,
+		logger:   log.WithFunc("cmd.hostOnlyListener.Accept"),
+	}, nil
 }
 
 func isHostPeer(conn net.Conn) bool {
