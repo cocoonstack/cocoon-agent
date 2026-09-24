@@ -331,7 +331,7 @@ func TestServerShutdownClosesIdleConn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("dial: %v", err)
 			}
-			defer conn.Close() //nolint:errcheck
+			defer conn.Close()
 
 			tt.shutdown(srv, cancel)
 			select {
