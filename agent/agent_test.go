@@ -331,7 +331,7 @@ func TestServerShutdownClosesIdleConn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("dial: %v", err)
 			}
-			defer conn.Close() //nolint:errcheck
+			defer conn.Close()
 
 			tt.shutdown(srv, cancel)
 			select {
@@ -383,7 +383,10 @@ func TestServerDrainsStdinAfterEarlyChildExit(t *testing.T) {
 	}
 	go func() {
 		chunk := make([]byte, 32*1024)
-		for enc.Encode(agent.Message{Type: agent.MsgStdin, Data: chunk}) == nil {
+		for {
+			if enc.Encode(agent.Message{Type: agent.MsgStdin, Data: chunk}) != nil {
+				return
+			}
 		}
 	}()
 
