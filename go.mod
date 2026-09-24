@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	github.com/mdlayher/vsock v1.3.0
-	github.com/projecteru2/core v0.1.5
+	github.com/projecteru2/core v0.1.3
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.48.0
 )
@@ -14,7 +14,7 @@ require (
 	github.com/cockroachdb/logtags v0.0.0-20241215232642-bb51bb14a506 // indirect
 	github.com/cockroachdb/redact v1.1.8 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/getsentry/sentry-go v0.49.0 // indirect
+	github.com/getsentry/sentry-go v0.48.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
