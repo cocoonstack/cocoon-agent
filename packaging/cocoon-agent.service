@@ -19,6 +19,7 @@ Environment=AGENT_LOG_LEVEL=info
 Restart=always
 RestartSec=2s
 LimitNOFILE=65536
+OOMPolicy=continue
 # KillMode=control-group (default) is correct: in-flight kubectl-exec
 # children inherit the unit's cgroup and are torn down with the agent
 # on systemctl stop.
